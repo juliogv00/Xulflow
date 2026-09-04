@@ -3,8 +3,9 @@ use crate::input::{self, EnigoState};
 use crate::settings::TypingTool;
 use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
 use enigo::{Direction, Enigo, Key, Keyboard};
-use log::info;
+use log::{info, warn};
 use std::process::Command;
+use std::sync::Mutex;
 #[cfg(target_os = "linux")]
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -39,6 +40,127 @@ fn write_text_to_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), Str
         .clipboard()
         .write_text(text)
         .map_err(|e| format!("Failed to write to clipboard: {}", e))
+}
+
+/// Result of trying to capture a selection via a simulated copy — see
+/// `PendingSelectionState`.
+#[derive(Debug, Clone, Default)]
+pub struct SelectionSnapshot {
+    pub had_selection: bool,
+    pub selected_text: Option<String>,
+}
+
+/// How long to wait after sending the copy keystroke before reading the
+/// clipboard back. Mirrors `paste_delay_ms`'s role for paste, but fixed
+/// rather than user-configurable — this fires on every dictation hotkey
+/// press, so it needs to stay small; slow apps just fall through to Dictado
+/// (see `selection_was_captured`'s doc comment).
+const COPY_SETTLE_MS: u64 = 120;
+
+/// How long `TranscribeAction::stop` will wait for a still-running detection
+/// before giving up and treating the recording as plain Dictado. Generous
+/// relative to `COPY_SETTLE_MS` — recordings are essentially never this
+/// short — because a real dictation always takes far longer than detection
+/// does, so this only ever matters for a near-instant press+release.
+pub const SELECTION_DETECTION_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Bridges `TranscribeAction::start` (which kicks detection off in the
+/// background so it never delays when recording begins) and
+/// `TranscribeAction::stop` (which needs the result, once transcription is
+/// ready, to decide Dictado vs Replace). One recording at a time — a fresh
+/// `begin` replaces whatever the previous recording left behind.
+#[derive(Default)]
+pub struct PendingSelectionState(Mutex<Option<std::sync::mpsc::Receiver<SelectionSnapshot>>>);
+
+impl PendingSelectionState {
+    /// Starts detecting a selection for a new recording. Safe to call from
+    /// any thread — it does the one part that must run on the main thread
+    /// itself (see below) and hands the rest to a background thread.
+    pub fn begin(&self, app_handle: &AppHandle) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *self.0.lock().unwrap() = Some(rx);
+
+        let ah = app_handle.clone();
+        let main_thread_ah = ah.clone();
+        // Only the keystroke itself needs the main thread (macOS layout
+        // resolution goes through Carbon's TIS APIs, see input.rs). Queuing
+        // just that keeps the main/UI thread's stall to a single key click
+        // instead of the full ~120ms settle delay.
+        let queued = app_handle.run_on_main_thread(move || {
+            let clipboard = main_thread_ah.clipboard();
+            let before = clipboard.read_text().ok().filter(|t| !t.is_empty());
+            let copy_sent =
+                with_enigo(&main_thread_ah, |enigo| input::send_copy_ctrl_c(enigo, 20)).is_ok();
+
+            std::thread::spawn(move || {
+                let _ = tx.send(finish_selection_capture(&ah, before, copy_sent));
+            });
+        });
+
+        if queued.is_err() {
+            warn!("Could not queue selection detection on the main thread");
+        }
+    }
+
+    /// Waits for this recording's detection result, falling through to "no
+    /// selection" if it never started (the Asistente hotkey doesn't call
+    /// `begin`) or hasn't finished within `timeout`.
+    pub fn take_result(&self, timeout: Duration) -> SelectionSnapshot {
+        let Some(rx) = self.0.lock().unwrap().take() else {
+            return SelectionSnapshot::default();
+        };
+        rx.recv_timeout(timeout).unwrap_or_default()
+    }
+}
+
+/// The settle delay, clipboard read/diff, and restore — everything after the
+/// copy keystroke that doesn't need the main thread.
+fn finish_selection_capture(
+    app_handle: &AppHandle,
+    before: Option<String>,
+    copy_sent: bool,
+) -> SelectionSnapshot {
+    let clipboard = app_handle.clipboard();
+
+    let snapshot = if copy_sent {
+        std::thread::sleep(Duration::from_millis(COPY_SETTLE_MS));
+        let after = clipboard.read_text().ok().filter(|t| !t.is_empty());
+        let had_selection = selection_was_captured(&before, &after);
+        SelectionSnapshot {
+            had_selection,
+            selected_text: if had_selection { after } else { None },
+        }
+    } else {
+        warn!("Could not send the copy keystroke; treating as no selection");
+        SelectionSnapshot::default()
+    };
+
+    // Always restore — this only detects, it never leaves the clipboard
+    // holding the captured selection (that's Replace's job, once it
+    // actually uses the text).
+    match &before {
+        Some(text) => {
+            let _ = write_text_to_clipboard(app_handle, text);
+        }
+        None => {
+            let _ = clipboard.clear();
+        }
+    }
+
+    snapshot
+}
+
+/// A copy changed the clipboard (or put something in an empty one) only if
+/// something was actually selected — an app with nothing selected leaves the
+/// clipboard exactly as it found it. Treats a clipboard read failure as "the
+/// same" (no selection detected), the safe default that falls through to
+/// Dictado instead of misfiring Replace on read errors.
+fn selection_was_captured(before: &Option<String>, after: &Option<String>) -> bool {
+    match (before, after) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(b), Some(a)) => b != a,
+    }
 }
 
 fn finish_clipboard_paste(
@@ -867,6 +989,35 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn selection_captured_when_clipboard_text_changed() {
+        assert!(selection_was_captured(
+            &Some("old".to_string()),
+            &Some("new".to_string())
+        ));
+    }
+
+    #[test]
+    fn selection_not_captured_when_clipboard_unchanged() {
+        assert!(!selection_was_captured(
+            &Some("same".to_string()),
+            &Some("same".to_string())
+        ));
+    }
+
+    #[test]
+    fn selection_captured_when_clipboard_was_empty_and_now_has_text() {
+        assert!(selection_was_captured(&None, &Some("new".to_string())));
+    }
+
+    #[test]
+    fn selection_not_captured_when_copy_produced_nothing() {
+        // Covers both "still empty" and "read failed after the copy" — either
+        // way there's no selected text to act on.
+        assert!(!selection_was_captured(&Some("old".to_string()), &None));
+        assert!(!selection_was_captured(&None, &None));
+    }
 
     #[cfg(target_os = "linux")]
     const YDOTOOL_0_1_8_HELP: &str = r#"

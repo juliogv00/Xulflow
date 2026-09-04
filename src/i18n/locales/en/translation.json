@@ -101,7 +101,7 @@
     },
     "permissions": {
       "title": "Permissions Required",
-      "description": "Handy needs a couple of permissions to work properly.",
+      "description": "Xul Flow needs a couple of permissions to work properly.",
       "microphone": {
         "title": "Microphone Access",
         "description": "Required to hear your voice for transcription."
@@ -161,7 +161,7 @@
     "general": {
       "title": "General",
       "shortcut": {
-        "title": "Handy Shortcuts",
+        "title": "Xul Flow Shortcuts",
         "description": "Configure keyboard shortcuts to trigger speech-to-text recording",
         "loading": "Loading shortcuts...",
         "none": "No shortcuts configured",
@@ -225,7 +225,7 @@
       },
       "rescan": {
         "label": "Rescan",
-        "tooltip": "Rescan for models added to the models folder or Hugging Face cache outside Handy"
+        "tooltip": "Rescan for models added to the models folder or Hugging Face cache outside Xul Flow"
       },
       "noModelsMatch": "No models match this filter."
     },
@@ -293,11 +293,11 @@
       },
       "autostart": {
         "label": "Launch on Startup",
-        "description": "Automatically start Handy when you log in to your computer."
+        "description": "Automatically start Xul Flow when you log in to your computer."
       },
       "showTrayIcon": {
         "label": "Show Tray Icon",
-        "description": "Display the Handy icon in the system tray."
+        "description": "Display the Xul Flow icon in the system tray."
       },
       "overlay": {
         "style": {
@@ -382,6 +382,25 @@
         "add": "Add",
         "remove": "Remove {{word}}",
         "duplicate": "\"{{word}}\" already exists"
+      },
+      "customDictionary": {
+        "title": "Custom Dictionary",
+        "description": "Fix specific mistranscriptions by replacing exact text after transcription, e.g. \"cloud\" → \"Claude Code\". For helping the model recognize names it doesn't know at all, use Custom Words instead.",
+        "fromPlaceholder": "Wrong",
+        "toPlaceholder": "Right",
+        "arrow": "→",
+        "add": "Add",
+        "remove": "Remove {{from}} → {{to}}",
+        "duplicate": "\"{{word}}\" already has a replacement"
+      },
+      "snippets": {
+        "title": "Snippets",
+        "description": "Dictate a short trigger word on its own and it gets replaced with a longer saved block of text — e.g. saying just \"signature\" pastes your full email signature. Only fires when the trigger is the whole dictation, not part of a longer sentence.",
+        "triggerPlaceholder": "Trigger (e.g. \"signature\")",
+        "expansionPlaceholder": "Text to paste instead",
+        "add": "Add",
+        "remove": "Remove snippet \"{{trigger}}\"",
+        "duplicate": "\"{{trigger}}\" already has a snippet"
       },
       "voiceActivityDetection": {
         "title": "Voice Activity Detection",
@@ -492,7 +511,7 @@
       },
       "updateChecks": {
         "label": "Check for Updates",
-        "description": "Automatically check for new versions of Handy",
+        "description": "Automatically check for new versions of Xul Flow",
         "lockedDescription": "Disabled by system configuration (HANDY_DISABLE_UPDATER)"
       },
       "whatsNewPreview": {
@@ -577,7 +596,7 @@
       },
       "keyboardDiagnostic": {
         "title": "Keyboard Diagnostic",
-        "description": "Checks whether keyboard events reach Handy. Only event counts are recorded — never which keys you press.",
+        "description": "Checks whether keyboard events reach Xul Flow. Only event counts are recorded — never which keys you press.",
         "run": "Run 10s diagnostic",
         "running": "Listening… press your shortcut a few times (e.g. Option+Space)",
         "secureInputLabel": "Secure Input",
@@ -591,7 +610,7 @@
         "mouse": "Mouse",
         "verdictBlocked": "Secure Input is blocking key events — keyed shortcuts cannot work until it is resolved.",
         "verdictSuspicious": "Modifier events arrived but no key events — something is suppressing keys even though Secure Input reports disabled. Please report this on GitHub.",
-        "verdictOk": "Key events are reaching Handy normally.",
+        "verdictOk": "Key events are reaching Xul Flow normally.",
         "verdictNoEvents": "No events captured — did you press any keys during the test?",
         "failed": "Diagnostic failed: {{error}}"
       }
@@ -600,15 +619,15 @@
       "title": "About",
       "version": {
         "title": "Version",
-        "description": "Current version of Handy"
+        "description": "Current version of Xul Flow"
       },
       "whatsNewUpdates": {
         "label": "Show What's New",
-        "description": "Show release notes after Handy updates"
+        "description": "Show release notes after Xul Flow updates"
       },
       "appDataDirectory": {
         "title": "App Data Directory",
-        "description": "Location where Handy stores its data"
+        "description": "Location where Xul Flow stores its data"
       },
       "sourceCode": {
         "title": "Source Code",
@@ -617,7 +636,7 @@
       },
       "supportDevelopment": {
         "title": "Support Development",
-        "description": "Help us continue building Handy",
+        "description": "Help us continue building Xul Flow",
         "button": "Donate"
       },
       "acknowledgments": {
@@ -625,7 +644,7 @@
         "ggml": {
           "title": "ggml",
           "description": "High-performance tensor library for on-device machine learning inference",
-          "details": "Handy's local speech-to-text is built on transcribe.cpp and ggml. Thanks to the amazing work by Georgi Gerganov and contributors."
+          "details": "Xul Flow's local speech-to-text is built on transcribe.cpp and ggml. Thanks to the amazing work by Georgi Gerganov and contributors."
         }
       }
     }
@@ -646,7 +665,7 @@
     "portableUpdateBrowseButton": "Open GitHub Releases"
   },
   "whatsNew": {
-    "title": "New in Handy v{{version}}"
+    "title": "New in Xul Flow v{{version}}"
   },
   "common": {
     "loading": "Loading...",
@@ -658,7 +677,7 @@
     "noOptionsFound": "No options found"
   },
   "accessibility": {
-    "permissionsDescription": "Handy needs accessibility permissions to type transcribed text.",
+    "permissionsDescription": "Xul Flow needs accessibility permissions to type transcribed text.",
     "openSettings": "Open System Settings"
   },
   "errors": {
@@ -679,13 +698,19 @@
     "pasteFailed": "Text could not be pasted into the active application.",
     "transcriptionFailedTitle": "Transcription Failed"
   },
+  "dictionaryTeach": {
+    "entryAddedTitle": "Added to dictionary",
+    "entryAddedDescription": "{{from}} → {{to}}",
+    "failedTitle": "Couldn't learn that",
+    "failedDescription": "Try rephrasing the correction, e.g. \"Xul, aprende que X se escribe Y\"."
+  },
   "appLanguage": {
     "title": "Application Language",
-    "description": "Change the language of the Handy interface"
+    "description": "Change the language of the Xul Flow interface"
   },
   "theme": {
     "title": "Application Theme",
-    "description": "Choose whether Handy follows your system theme or stays light or dark",
+    "description": "Choose whether Xul Flow follows your system theme or stays light or dark",
     "options": {
       "system": "System",
       "light": "Light",

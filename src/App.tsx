@@ -153,6 +153,30 @@ function App() {
     };
   }, [t]);
 
+  // Fase 7: listen for dictionary-teach outcomes (voice-taught corrections,
+  // via Replace's selection+voice path or the "Xul, aprende que..." voice-only
+  // path) and show a confirmation/failure toast. The entry itself is already
+  // persisted by the time this fires (see settings::add_or_update_custom_dictionary_entry).
+  useEffect(() => {
+    const unlistenAdded = listen<{ from: string; to: string }>(
+      "dictionary-entry-added",
+      (event) => {
+        toast.success(t("dictionaryTeach.entryAddedTitle"), {
+          description: t("dictionaryTeach.entryAddedDescription", event.payload),
+        });
+      },
+    );
+    const unlistenFailed = listen("dictionary-teach-failed", () => {
+      toast.error(t("dictionaryTeach.failedTitle"), {
+        description: t("dictionaryTeach.failedDescription"),
+      });
+    });
+    return () => {
+      unlistenAdded.then((fn) => fn());
+      unlistenFailed.then((fn) => fn());
+    };
+  }, [t]);
+
   // Listen for model loading failures and show a toast
   useEffect(() => {
     const unlisten = listen<ModelStateEvent>("model-state-changed", (event) => {

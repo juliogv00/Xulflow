@@ -5,7 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fmt;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
@@ -92,6 +93,29 @@ pub struct LLMPrompt {
     pub id: String,
     pub name: String,
     pub prompt: String,
+}
+
+/// One "wrong → right" substitution pair in the custom dictionary. Distinct
+/// from `custom_words` (a flat vocabulary list used to bias/fuzzy-correct
+/// toward proper nouns the model already got *close* to): each entry here is
+/// a literal, user-authored replacement applied after transcription — see
+/// `apply_custom_dictionary` in audio_toolkit/text.rs.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct DictionaryEntry {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// Fase 8: a snippet — dictating `trigger` as the *entire* utterance (not
+/// just somewhere in it, unlike the custom dictionary) pastes `expansion`
+/// instead. No default entries; users add their own via Ajustes → Avanzado.
+/// See `apply_snippets` in audio_toolkit/text.rs.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct SnippetEntry {
+    pub id: String,
+    pub trigger: String,
+    pub expansion: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -425,8 +449,12 @@ pub struct AppSettings {
     pub debug_mode: bool,
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
-    #[serde(default)]
+    #[serde(default = "default_custom_words")]
     pub custom_words: Vec<String>,
+    #[serde(default = "default_custom_dictionary")]
+    pub custom_dictionary: Vec<DictionaryEntry>,
+    #[serde(default)]
+    pub snippets: Vec<SnippetEntry>,
     #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
@@ -776,6 +804,50 @@ fn default_transcribe_gpu_device() -> Option<String> {
     None // automatic device selection
 }
 
+/// Starter dictionary, curated from real transcription errors observed while
+/// building Xul Flow (see the PRD). Grows over time from actual usage rather
+/// than speculative entries.
+fn default_custom_dictionary() -> Vec<DictionaryEntry> {
+    vec![
+        DictionaryEntry {
+            id: "seed-cloud-claude-code".to_string(),
+            from: "cloud".to_string(),
+            to: "Claude Code".to_string(),
+        },
+        // "Xul" (the Asistente trigger word) mis-heard as these — confirmed
+        // real errors, not speculative.
+        DictionaryEntry {
+            id: "seed-chul-xul".to_string(),
+            from: "Chul".to_string(),
+            to: "Xul".to_string(),
+        },
+        DictionaryEntry {
+            id: "seed-sul-xul".to_string(),
+            from: "Sul".to_string(),
+            to: "Xul".to_string(),
+        },
+        DictionaryEntry {
+            id: "seed-jul-xul".to_string(),
+            from: "Jul".to_string(),
+            to: "Xul".to_string(),
+        },
+    ]
+}
+
+/// Vocabulary hints for `custom_words` (fuzzy-corrected toward these, or fed
+/// to the model as an initial prompt) — proper nouns and jargon from Julio's
+/// stack that generic Whisper vocabularies don't know.
+fn default_custom_words() -> Vec<String> {
+    vec![
+        "Claude Code".to_string(),
+        "Ollama".to_string(),
+        "qwen-fable".to_string(),
+        "Xul".to_string(),
+        "Xul Flow".to_string(),
+        "VMNTe".to_string(),
+    ]
+}
+
 /// Accept the 0.1-era integer registry index long enough for the schema
 /// migration to clear it. Device indices are process-local in transcribe.cpp
 /// 0.2 and must never be carried across launches.
@@ -932,7 +1004,9 @@ pub fn get_default_settings() -> AppSettings {
         overlay_position: default_overlay_position(),
         debug_mode: false,
         log_level: default_log_level(),
-        custom_words: Vec::new(),
+        custom_words: default_custom_words(),
+        custom_dictionary: default_custom_dictionary(),
+        snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
@@ -1212,6 +1286,84 @@ pub fn write_settings(app: &AppHandle, settings: AppSettings) {
         .expect("Failed to initialize store");
 
     store.set("settings", serde_json::to_value(&settings).unwrap());
+}
+
+/// Fase 7: add (or update) one auto-learned dictionary entry from the
+/// backend — the voice-teach flow doesn't go through the frontend's
+/// `update_setting` command, so it persists directly and then tells the UI
+/// what changed via the same `settings-changed` event other backend-driven
+/// mutations use (see e.g. `managers::audio::persist_default_microphone_after_fallback`).
+///
+/// Case-insensitive match on `from`: re-teaching an existing word updates its
+/// target instead of creating a duplicate. Returns `false` (no-op, nothing
+/// persisted) for a blank pair or a no-change re-teach, so the caller can
+/// skip emitting a "learned" confirmation.
+pub fn add_or_update_custom_dictionary_entry(app: &AppHandle, from: &str, to: &str) -> bool {
+    let from = from.trim();
+    let to = to.trim();
+    if from.is_empty() || to.is_empty() || from.eq_ignore_ascii_case(to) {
+        return false;
+    }
+
+    let mut settings = get_settings(app);
+    match settings
+        .custom_dictionary
+        .iter_mut()
+        .find(|entry| entry.from.eq_ignore_ascii_case(from))
+    {
+        Some(existing) if existing.to == to => return false,
+        Some(existing) => existing.to = to.to_string(),
+        None => settings.custom_dictionary.push(DictionaryEntry {
+            id: format!("auto_{}", chrono::Utc::now().timestamp_millis()),
+            from: from.to_string(),
+            to: to.to_string(),
+        }),
+    }
+
+    write_settings(app, settings);
+    let _ = app.emit(
+        "dictionary-entry-added",
+        serde_json::json!({ "from": from, "to": to }),
+    );
+
+    // A sound + native notification, since this can happen while the main
+    // window is hidden in the tray (the normal state while dictating into
+    // another app) — the in-window toast alone wouldn't be seen then.
+    // Clicking the notification brings Xul Flow to the foreground (the
+    // platform's default behavior); it doesn't yet jump straight to the
+    // Custom Dictionary section — see AGENTS.md/Fase 7 notes for that
+    // follow-up.
+    crate::audio_feedback::play_feedback_sound(app, crate::audio_feedback::SoundType::Start);
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("Añadido al diccionario")
+        .body(format!("{from} → {to}"))
+        .show()
+    {
+        warn!("Failed to show dictionary-learned notification: {}", err);
+    }
+
+    true
+}
+
+/// Companion to `add_or_update_custom_dictionary_entry` for the failure
+/// path (the model couldn't extract a clear correction) — same reasoning
+/// for why this needs a sound + native notification and not just the
+/// in-window toast, which the "dictionary-teach-failed" event alone also
+/// still drives for when the window happens to be visible.
+pub fn notify_dictionary_teach_failed(app: &AppHandle) {
+    let _ = app.emit("dictionary-teach-failed", ());
+    crate::audio_feedback::play_feedback_sound(app, crate::audio_feedback::SoundType::Stop);
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title("No he podido aprenderlo")
+        .body("Prueba a reformular la corrección, p. ej. \"Xul, aprende que X se escribe Y\".")
+        .show()
+    {
+        warn!("Failed to show dictionary-teach-failed notification: {}", err);
+    }
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {

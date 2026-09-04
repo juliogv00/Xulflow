@@ -1,6 +1,7 @@
 use crate::audio_toolkit::{
-    apply_custom_words, detect_output_language, normalize_transcription_output,
-    remove_filler_words, OutputLanguageEvidence,
+    apply_custom_dictionary, apply_custom_words, apply_punctuation_commands, apply_snippets,
+    detect_output_language, normalize_transcription_output, remove_filler_words,
+    OutputLanguageEvidence,
 };
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
@@ -1774,6 +1775,16 @@ fn post_process_transcription_text(
             raw
         };
 
+        // Explicit "wrong → right" substitutions (the custom dictionary),
+        // applied after custom-words correction and before filler removal so
+        // both later steps see the final wording.
+        let corrected = apply_custom_dictionary(&corrected, &settings.custom_dictionary);
+
+        // Spoken punctuation commands ("coma", "punto y aparte", ...). Always
+        // on — a fixed table, not gated by any setting — same as the custom
+        // dictionary it runs right after.
+        let corrected = apply_punctuation_commands(&corrected);
+
         // Last-resort language evidence: confidence-gated detection from the
         // transcribed text itself, constrained to the model's languages. Only
         // consulted when it can change the outcome (built-in gated fillers).
@@ -1800,7 +1811,13 @@ fn post_process_transcription_text(
             settings.filler_word_removal_enabled,
         );
 
-        normalize_transcription_output(&without_fillers)
+        // Fase 8: snippets. Checked last, against the fully cleaned-up
+        // transcription, so a trigger still matches even when the raw ASR
+        // output needed custom-words/dictionary correction or had filler
+        // words to strip first.
+        let expanded = apply_snippets(&without_fillers, &settings.snippets);
+
+        normalize_transcription_output(&expanded)
     })
 }
 

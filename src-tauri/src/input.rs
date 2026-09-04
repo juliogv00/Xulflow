@@ -12,10 +12,11 @@ mod macos {
     type CfDataRef = *const c_void;
     type CfStringRef = *const c_void;
 
-    // kVK_ANSI_V. This is the behavior Handy used before layout-aware
-    // resolution and remains the safest fallback if macOS cannot expose the
-    // active layout.
+    // kVK_ANSI_V / kVK_ANSI_C. This is the behavior Handy used before
+    // layout-aware resolution and remains the safest fallback if macOS
+    // cannot expose the active layout.
     const ANSI_V_KEYCODE: u16 = 9;
+    const ANSI_C_KEYCODE: u16 = 8;
     const KEYCODE_COUNT: u16 = 128;
     const UC_KEY_ACTION_DISPLAY: u16 = 3;
     const UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK: u32 = 1;
@@ -68,13 +69,14 @@ mod macos {
         (0..KEYCODE_COUNT).find(|&keycode| matches(keycode))
     }
 
-    /// Resolves the physical key that macOS interprets as `v` while Command is
-    /// held. Including Command is important: non-Latin layouts commonly map
-    /// Cmd shortcuts to their ANSI equivalents, while standard Dvorak does not.
+    /// Resolves the physical key that macOS interprets as `target_char` while
+    /// Command is held. Including Command is important: non-Latin layouts
+    /// commonly map Cmd shortcuts to their ANSI equivalents, while standard
+    /// Dvorak does not.
     ///
-    /// TIS APIs must run on the main thread. Handy's paste path already enters
-    /// through `AppHandle::run_on_main_thread` before reaching this function.
-    fn resolve_command_v_keycode() -> Result<u16, String> {
+    /// TIS APIs must run on the main thread. Callers already enter through
+    /// `AppHandle::run_on_main_thread` before reaching this function.
+    fn resolve_command_keycode(target_char: u8) -> Result<u16, String> {
         // SAFETY: This function is called on the macOS main thread. The returned
         // source follows the Create Rule and is released by InputSource::drop.
         let source = InputSource(unsafe { TISCopyCurrentKeyboardLayoutInputSource() });
@@ -123,26 +125,43 @@ mod macos {
                 )
             };
 
-            status == 0 && length == 1 && chars[0] == u16::from(b'v')
+            status == 0 && length == 1 && chars[0] == u16::from(target_char)
         })
-        .ok_or_else(|| "could not map Cmd+V in the current macOS keyboard layout".to_string())?;
+        .ok_or_else(|| {
+            format!(
+                "could not map Cmd+{} in the current macOS keyboard layout",
+                target_char as char
+            )
+        })?;
 
         Ok(keycode)
     }
 
-    pub(super) fn command_v_key() -> Key {
-        match resolve_command_v_keycode() {
+    fn command_key_for(target_char: u8, ansi_fallback: u16) -> Key {
+        match resolve_command_keycode(target_char) {
             Ok(keycode) => {
-                debug!("Resolved Cmd+V for the active macOS layout to keycode {keycode}");
+                debug!(
+                    "Resolved Cmd+{} for the active macOS layout to keycode {keycode}",
+                    target_char as char
+                );
                 Key::Other(u32::from(keycode))
             }
             Err(error) => {
                 warn!(
-                    "Could not resolve Cmd+V for the active macOS layout ({error}); using ANSI V keycode {ANSI_V_KEYCODE}"
+                    "Could not resolve Cmd+{} for the active macOS layout ({error}); using ANSI keycode {ansi_fallback}",
+                    target_char as char
                 );
-                Key::Other(u32::from(ANSI_V_KEYCODE))
+                Key::Other(u32::from(ansi_fallback))
             }
         }
+    }
+
+    pub(super) fn command_v_key() -> Key {
+        command_key_for(b'v', ANSI_V_KEYCODE)
+    }
+
+    pub(super) fn command_c_key() -> Key {
+        command_key_for(b'c', ANSI_C_KEYCODE)
     }
 }
 
@@ -192,6 +211,33 @@ pub fn send_paste_ctrl_v(enigo: &mut Enigo, hold_ms: u64) -> Result<(), String> 
     enigo
         .key(v_key_code, enigo::Direction::Click)
         .map_err(|e| format!("Failed to click V key: {}", e))?;
+
+    std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+
+    enigo
+        .key(modifier_key, enigo::Direction::Release)
+        .map_err(|e| format!("Failed to release modifier key: {}", e))?;
+
+    Ok(())
+}
+
+/// Sends a Cmd+C / Ctrl+C copy command, to capture whatever text is
+/// currently selected in the frontmost application (used to detect a
+/// selection before deciding between Dictado and Replace).
+pub fn send_copy_ctrl_c(enigo: &mut Enigo, hold_ms: u64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let (modifier_key, c_key_code) = (Key::Meta, macos::command_c_key());
+    #[cfg(target_os = "windows")]
+    let (modifier_key, c_key_code) = (Key::Control, Key::Other(0x43)); // VK_C
+    #[cfg(target_os = "linux")]
+    let (modifier_key, c_key_code) = (Key::Control, Key::Unicode('c'));
+
+    enigo
+        .key(modifier_key, enigo::Direction::Press)
+        .map_err(|e| format!("Failed to press modifier key: {}", e))?;
+    enigo
+        .key(c_key_code, enigo::Direction::Click)
+        .map_err(|e| format!("Failed to click C key: {}", e))?;
 
     std::thread::sleep(std::time::Duration::from_millis(hold_ms));
 

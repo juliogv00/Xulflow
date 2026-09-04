@@ -15,7 +15,7 @@ use crate::utils::{
 };
 use crate::TranscriptionCoordinator;
 use ferrous_opencc::{config::BuiltinConfig, OpenCC};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::future::Future;
@@ -56,6 +56,10 @@ pub trait ShortcutAction: Send + Sync {
 // Transcribe Action
 struct TranscribeAction {
     post_process: bool,
+    /// Only the plain dictation hotkey ("transcribe") detects a selection —
+    /// the Asistente hotkey ("transcribe_with_post_process") is its own
+    /// dedicated action and was never meant to branch into Replace.
+    detect_selection: bool,
 }
 
 /// Field name for structured output JSON schema
@@ -116,6 +120,272 @@ where
 
 fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool {
     style == OverlayStyle::Live && is_streaming
+}
+
+/// The post-processing provider/model/key a call is about to use, resolved
+/// once and shared by Replace and the dictionary-teach extraction call —
+/// both need exactly what `post_process_transcription` resolves inline for
+/// itself, so this factors that out rather than repeating it a third time.
+struct ResolvedProvider {
+    provider: crate::settings::PostProcessProvider,
+    model: String,
+    api_key: String,
+    disable_reasoning: bool,
+}
+
+fn resolve_active_provider(settings: &AppSettings, context: &str) -> Option<ResolvedProvider> {
+    let provider = match settings.active_post_process_provider().cloned() {
+        Some(provider) => provider,
+        None => {
+            debug!("{context} skipped because no post-processing provider is selected");
+            return None;
+        }
+    };
+
+    let model = settings
+        .post_process_models
+        .get(&provider.id)
+        .cloned()
+        .unwrap_or_default();
+
+    if model.trim().is_empty() {
+        debug!(
+            "{context} skipped because provider '{}' has no model configured",
+            provider.id
+        );
+        return None;
+    }
+
+    let api_key = settings
+        .post_process_api_keys
+        .get(&provider.id)
+        .cloned()
+        .unwrap_or_default();
+    let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter");
+
+    Some(ResolvedProvider {
+        provider,
+        model,
+        api_key,
+        disable_reasoning,
+    })
+}
+
+/// A sentinel line an LLM was asked to answer with verbatim instead of prose,
+/// to hand back a special outcome (Replace's teach detection, the dictionary
+/// extraction call) rather than a normal text result. Case-insensitive on
+/// the prefix; the rest of the line is returned trimmed.
+fn strip_sentinel_prefix<'a>(content: &'a str, prefix: &str) -> Option<&'a str> {
+    let line = content.trim();
+    if line.len() < prefix.len() {
+        return None;
+    }
+    let (head, rest) = line.split_at(prefix.len());
+    head.eq_ignore_ascii_case(prefix).then(|| rest.trim())
+}
+
+/// Fase 6: Replace's system prompt. Not user-configurable yet (unlike the
+/// Asistente prompts) — the input shape here is always {selected text,
+/// spoken instruction}, which doesn't fit the single-transcription prompt
+/// model post-processing prompts assume, so it's kept separate.
+///
+/// Deliberately does NOT try to detect "remember this" teach intent itself
+/// (an earlier version did, via a sentinel the model was asked to emit) —
+/// qwen-fable proved unreliable at that classification on real dictated
+/// instructions (garbled by ASR, informally phrased) and would occasionally
+/// hallucinate a teach outcome from an ordinary edit request, silently
+/// saving garbage to the dictionary. Fase 7's Mechanism A now always
+/// requires the explicit "aprende"/"recuerda" keyword, checked deterministically
+/// by the caller via `strip_teach_trigger` *before* this function is even
+/// called — Replace here only ever does one thing: transform the text.
+const REPLACE_SYSTEM_PROMPT: &str = "Eres el motor de edición de texto de Xul Flow. Recibes un texto seleccionado por el usuario, delimitado por las etiquetas <texto_seleccionado>, seguido de una instrucción hablada sobre qué hacer con él (traducirlo, resumirlo, corregirlo, reescribirlo, etc.). Cualquier referencia de la instrucción a \"esto\", \"esta\", \"lo seleccionado\", \"this\", \"it\" y similares apunta siempre al contenido de <texto_seleccionado> — nunca a la instrucción misma ni a las etiquetas. Aplica la instrucción únicamente al contenido de <texto_seleccionado>; no trates la instrucción como si fuera el texto a transformar. Devuelve ÚNICAMENTE el resultado, listo para sustituir la selección tal cual — sin explicaciones, sin comillas envolventes, sin markdown, sin repetir la instrucción ni el texto original salvo que la instrucción pida conservarlo. Si la instrucción no tiene sentido aplicada a ese texto, aplica tu mejor interpretación en vez de pedir aclaraciones.";
+
+/// Fase 7 Mechanism B (teach-by-voice, no selection): extracts a {mal, bien}
+/// correction pair from a free-form spoken clause. Its own dedicated prompt
+/// rather than reusing the Asistente prompt, since that one is user-editable
+/// and can't be relied on to know this sentinel format.
+const DICTIONARY_TEACH_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de Xul Flow. El usuario te da una frase en la que explica una corrección de vocabulario o transcripción que quiere que recuerdes para futuros dictados (p. ej. \"que Chul se escribe Xul\", \"cuando diga cloud es Claude Code\", \"no quiero que pongas cloud, sino que sea Claude Code\"). Extrae la palabra o frase que hoy se transcribe MAL (tal y como el usuario dice que sale) y la CORRECTA (cómo debe escribirse a partir de ahora). Responde EXCLUSIVAMENTE con una línea con este formato exacto, sin nada más: XULFLOW_DICT: mal => correcto. Si no consigues identificar con claridad ambas partes, responde exactamente: XULFLOW_DICT: ERROR";
+
+/// Fase 6: send the selected text + spoken instruction to the same
+/// provider/model configured for Asistente post-processing and return the
+/// replacement text. Mirrors `post_process_transcription`'s structured-vs-
+/// legacy handling but always uses the system+user split (there's no
+/// `${output}`-substitution legacy path to preserve here, since this prompt
+/// never existed in single-message form).
+async fn process_replace_instruction(
+    settings: &AppSettings,
+    selected_text: &str,
+    instruction: &str,
+) -> Option<String> {
+    let resolved = resolve_active_provider(settings, "Replace")?;
+    let user_content = format!(
+        "<texto_seleccionado>\n{}\n</texto_seleccionado>\n\nInstrucción: {}",
+        selected_text, instruction
+    );
+
+    debug!(
+        "Starting Replace LLM call with provider '{}' (model: {})",
+        resolved.provider.id, resolved.model
+    );
+
+    match crate::llm_client::send_chat_completion_with_schema(
+        &resolved.provider,
+        resolved.api_key,
+        &resolved.model,
+        user_content,
+        Some(REPLACE_SYSTEM_PROMPT.to_string()),
+        None,
+        resolved.disable_reasoning,
+    )
+    .await
+    {
+        Ok(Some(content)) => {
+            let content = strip_invisible_chars(strip_think_block(&content));
+            if content.trim().is_empty() {
+                error!("Replace: LLM response was empty after stripping");
+                None
+            } else {
+                debug!(
+                    "Replace succeeded for provider '{}'. Output length: {} chars",
+                    resolved.provider.id,
+                    content.len()
+                );
+                Some(content)
+            }
+        }
+        Ok(None) => {
+            error!("Replace: LLM API response has no content");
+            None
+        }
+        Err(e) => {
+            error!("Replace failed for provider '{}': {}", resolved.provider.id, e);
+            None
+        }
+    }
+}
+
+/// Rejects an extracted correction that reads as the model losing the plot
+/// rather than answering — e.g. echoing "Xul Flow"/its own product name back
+/// as the "correction" when the input sentence was too garbled (by ASR) to
+/// make sense of. Seen in practice on `extract_dictionary_teach` with a
+/// mangled clause; cheap enough to guard in both extraction functions rather
+/// than trust a small local model's judgment unconditionally on bad input.
+fn looks_hallucinated(to: &str) -> bool {
+    let lower = to.to_lowercase();
+    lower.contains("xulflow") || lower.contains("xul flow")
+}
+
+/// Fase 7 Mechanism B: extract a {mal, bien} pair from a spoken teach clause
+/// (already stripped of "Xul, aprende que..."). Returns `None` on any
+/// failure — HTTP error, unconfigured provider, or the model answering
+/// `XULFLOW_DICT: ERROR` because it couldn't parse two clear parts.
+async fn extract_dictionary_teach(settings: &AppSettings, clause: &str) -> Option<(String, String)> {
+    let resolved = resolve_active_provider(settings, "Dictionary teach")?;
+
+    debug!(
+        "Starting dictionary-teach extraction with provider '{}' (model: {})",
+        resolved.provider.id, resolved.model
+    );
+
+    match crate::llm_client::send_chat_completion_with_schema(
+        &resolved.provider,
+        resolved.api_key,
+        &resolved.model,
+        clause.to_string(),
+        Some(DICTIONARY_TEACH_SYSTEM_PROMPT.to_string()),
+        None,
+        resolved.disable_reasoning,
+    )
+    .await
+    {
+        Ok(Some(content)) => {
+            let content = strip_invisible_chars(strip_think_block(&content));
+            let rest = strip_sentinel_prefix(&content, "XULFLOW_DICT:")?;
+            if rest.eq_ignore_ascii_case("ERROR") {
+                debug!("Dictionary teach: model couldn't identify a clear correction pair");
+                return None;
+            }
+            let (from, to) = rest.split_once("=>")?;
+            let (from, to) = (from.trim(), to.trim());
+            if from.is_empty() || to.is_empty() || looks_hallucinated(to) {
+                debug!("Dictionary teach: rejecting suspect extraction '{}' => '{}'", from, to);
+                return None;
+            }
+            debug!("Dictionary teach extracted '{}' => '{}'", from, to);
+            Some((from.to_string(), to.to_string()))
+        }
+        Ok(None) => {
+            error!("Dictionary teach: LLM API response has no content");
+            None
+        }
+        Err(e) => {
+            error!(
+                "Dictionary teach failed for provider '{}': {}",
+                resolved.provider.id, e
+            );
+            None
+        }
+    }
+}
+
+/// Fase 7 Mechanism A: extract just the corrected spelling from a teach
+/// clause when the "mal" half is already known (the current selection) —
+/// used instead of asking Replace's general-purpose prompt to *detect*
+/// teach intent, which qwen-fable proved unreliable at (it kept treating an
+/// explicit "no quiero que escribas X, quiero que sea Y" as a one-off edit
+/// instead of a correction to remember). Requiring the "aprende"/"recuerda"
+/// keyword (checked by the caller via `strip_teach_trigger` before this is
+/// called) turns that fuzzy classification into a much easier extraction —
+/// just "what's the corrected spelling in this sentence" — with one thing
+/// already given instead of two things to infer.
+const TEACH_CORRECTION_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de Xul Flow. El usuario te dice cómo debe escribirse a partir de ahora un texto que hoy se transcribe como \"{selected}\" — esa parte ya la sabes, no hace falta que la repitas. Tu única tarea es leer la frase del usuario y responder EXCLUSIVAMENTE con la ortografía correcta que describe, sin nada más — sin comillas, sin explicaciones, sin repetir la frase ni el texto mal escrito. Si no consigues identificar con claridad cuál es la corrección, responde exactamente: ERROR";
+
+async fn extract_teach_correction(
+    settings: &AppSettings,
+    selected_text: &str,
+    clause: &str,
+) -> Option<String> {
+    let resolved = resolve_active_provider(settings, "Teach correction")?;
+    let system_prompt = TEACH_CORRECTION_SYSTEM_PROMPT.replace("{selected}", selected_text);
+
+    debug!(
+        "Starting teach-correction extraction with provider '{}' (model: {})",
+        resolved.provider.id, resolved.model
+    );
+
+    match crate::llm_client::send_chat_completion_with_schema(
+        &resolved.provider,
+        resolved.api_key,
+        &resolved.model,
+        clause.to_string(),
+        Some(system_prompt),
+        None,
+        resolved.disable_reasoning,
+    )
+    .await
+    {
+        Ok(Some(content)) => {
+            let content = strip_invisible_chars(strip_think_block(&content));
+            let to = content.trim();
+            if to.is_empty() || to.eq_ignore_ascii_case("ERROR") || looks_hallucinated(to) {
+                debug!("Teach correction: model couldn't identify a clear correction");
+                None
+            } else {
+                Some(to.to_string())
+            }
+        }
+        Ok(None) => {
+            error!("Teach correction: LLM API response has no content");
+            None
+        }
+        Err(e) => {
+            error!(
+                "Teach correction failed for provider '{}': {}",
+                resolved.provider.id, e
+            );
+            None
+        }
+    }
 }
 
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
@@ -307,15 +577,32 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         }
     }
 
-    // Legacy mode: Replace ${output} variable in the prompt with the actual text
-    let processed_prompt = prompt.replace("${output}", transcription);
-    debug!("Processed prompt length: {} chars", processed_prompt.len());
+    // Legacy mode. Prompts written with a literal ${output} placeholder (the
+    // default "Improve Transcriptions" prompt, which wraps it in its own
+    // <transcript> tags) get it substituted in place, as a single message —
+    // unchanged from before. A prompt written as pure instructions with no
+    // placeholder (e.g. an assistant persona prompt) is instead sent as a
+    // system message, with the transcription as a separate user turn.
+    // Without this split, a placeholder-less prompt would silently never
+    // include the transcription at all — the model would only ever see its
+    // own instructions and nothing to respond to.
+    let (system_prompt, user_content) = if prompt.contains("${output}") {
+        (None, prompt.replace("${output}", transcription))
+    } else {
+        (
+            Some(build_system_prompt(&prompt)),
+            transcription.to_string(),
+        )
+    };
+    debug!("Processed prompt length: {} chars", user_content.len());
 
-    match crate::llm_client::send_chat_completion(
+    match crate::llm_client::send_chat_completion_with_schema(
         &provider,
         api_key,
         &model,
-        processed_prompt,
+        user_content,
+        system_prompt,
+        None,
         disable_reasoning,
     )
     .await
@@ -546,6 +833,17 @@ impl ShortcutAction for TranscribeAction {
                     "Recording request accepted in {:?}; waiting for first microphone samples",
                     recording_start_time.elapsed()
                 );
+
+                // Kicked off now, not awaited: detection runs concurrently
+                // with the recording that's about to start, so it never adds
+                // to keypress->capture latency. `stop()` collects the result
+                // once transcription is ready, with a short timeout of its
+                // own for the rare recording shorter than detection itself.
+                if self.detect_selection {
+                    app.state::<crate::clipboard::PendingSelectionState>()
+                        .begin(app);
+                }
+
                 let generation = readiness.generation();
                 let app_clone = app.clone();
                 let rm_clone = Arc::clone(&rm);
@@ -669,6 +967,7 @@ impl ShortcutAction for TranscribeAction {
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
+        let detect_selection = self.detect_selection;
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -766,6 +1065,307 @@ impl ShortcutAction for TranscribeAction {
                                 transcription_time.elapsed(),
                                 utils::redact_text(&transcription)
                             );
+
+                            // Collect Fase 4's detection result. `recv_timeout`
+                            // blocks, but only in the rare case where a
+                            // recording is shorter than detection itself —
+                            // ordinarily detection finished long before this
+                            // point, well inside a real dictation's length.
+                            let selection = if detect_selection {
+                                ah.state::<crate::clipboard::PendingSelectionState>()
+                                    .take_result(crate::clipboard::SELECTION_DETECTION_TIMEOUT)
+                            } else {
+                                Default::default()
+                            };
+
+                            if selection.had_selection {
+                                let selected_text = selection.selected_text.unwrap_or_default();
+
+                                // Replace tolerates a leading "Xul" the same way
+                                // Dictado does, but doesn't require it — having a
+                                // selection at all is already an unambiguous signal
+                                // the user wants an edit, not plain dictation.
+                                let instruction =
+                                    crate::audio_toolkit::strip_xul_trigger(&transcription)
+                                        .unwrap_or(transcription);
+
+                                if selected_text.trim().is_empty() || instruction.trim().is_empty()
+                                {
+                                    info!(
+                                        "Replace detected but selection or instruction was empty ({} chars selected, instruction: '{}'); skipping",
+                                        selected_text.chars().count(),
+                                        utils::redact_text(&instruction)
+                                    );
+                                    utils::hide_recording_overlay(&ah);
+                                    set_tray_state(&ah, TrayIconState::Idle);
+                                    return;
+                                }
+
+                                info!(
+                                    "Replace detected — {} chars selected, instruction: '{}'",
+                                    selected_text.chars().count(),
+                                    utils::redact_text(&instruction)
+                                );
+
+                                if use_streaming_overlay {
+                                    tm.emit_stream_working(StreamWorkKind::Polishing);
+                                } else {
+                                    show_processing_overlay(&ah);
+                                }
+
+                                // Fase 7 Mechanism A, keyword path: "aprende"/
+                                // "recuerda" with a selection forces teach mode
+                                // deterministically instead of relying on
+                                // process_replace_instruction's in-prompt intent
+                                // detection, which qwen-fable doesn't reliably
+                                // catch for free-form corrections (see the
+                                // extract_teach_correction doc comment). Instruction
+                                // without the keyword still falls through to that
+                                // best-effort detection below.
+                                if let Some(clause) =
+                                    crate::audio_toolkit::strip_teach_trigger(&instruction)
+                                {
+                                    let teach_settings = get_settings(&ah);
+                                    let to = complete_unless_cancelled(
+                                        extract_teach_correction(
+                                            &teach_settings,
+                                            &selected_text,
+                                            &clause,
+                                        ),
+                                        || rm.was_cancelled_since(cancel_generation),
+                                    )
+                                    .await
+                                    .flatten();
+
+                                    let Some(to) = to else {
+                                        debug!(
+                                            "Replace teach: couldn't extract a correction; leaving the selection untouched"
+                                        );
+                                        crate::settings::notify_dictionary_teach_failed(&ah);
+                                        utils::hide_recording_overlay(&ah);
+                                        set_tray_state(&ah, TrayIconState::Idle);
+                                        return;
+                                    };
+
+                                    let learned = crate::settings::add_or_update_custom_dictionary_entry(
+                                        &ah,
+                                        &selected_text,
+                                        &to,
+                                    );
+                                    if learned {
+                                        info!(
+                                            "Dictionary learned via Replace: '{}' => '{}'",
+                                            utils::redact_text(&selected_text),
+                                            utils::redact_text(&to)
+                                        );
+                                    } else {
+                                        debug!(
+                                            "Dictionary teach via Replace: no change (already taught or blank)"
+                                        );
+                                    }
+
+                                    if wav_saved {
+                                        if let Err(err) = hm.save_entry(
+                                            file_name,
+                                            instruction,
+                                            true,
+                                            Some(to.clone()),
+                                            Some("Xul Flow — Aprendizaje".to_string()),
+                                        ) {
+                                            error!("Failed to save history entry: {}", err);
+                                        }
+                                    }
+
+                                    let ah_clone = ah.clone();
+                                    let paste_time = Instant::now();
+                                    let rm_for_paste = Arc::clone(&rm);
+                                    ah.run_on_main_thread(move || {
+                                        if rm_for_paste.was_cancelled_since(cancel_generation) {
+                                            debug!(
+                                                "Transcription operation cancelled before Replace paste"
+                                            );
+                                            utils::hide_recording_overlay(&ah_clone);
+                                            set_tray_state(&ah_clone, TrayIconState::Idle);
+                                            return;
+                                        }
+
+                                        match utils::paste(to, ah_clone.clone()) {
+                                            Ok(()) => debug!(
+                                                "Replace teach pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            ),
+                                            Err(e) => {
+                                                error!("Failed to paste Replace teach result: {}", e);
+                                                let _ = ah_clone.emit("paste-error", ());
+                                            }
+                                        }
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        set_tray_state(&ah_clone, TrayIconState::Idle);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!(
+                                            "Failed to run Replace teach paste on main thread: {:?}",
+                                            e
+                                        );
+                                        utils::hide_recording_overlay(&ah);
+                                        set_tray_state(&ah, TrayIconState::Idle);
+                                    });
+
+                                    return;
+                                }
+
+                                let replace_settings = get_settings(&ah);
+                                let replacement = match complete_unless_cancelled(
+                                    process_replace_instruction(
+                                        &replace_settings,
+                                        &selected_text,
+                                        &instruction,
+                                    ),
+                                    || rm.was_cancelled_since(cancel_generation),
+                                )
+                                .await
+                                .flatten()
+                                {
+                                    Some(text) if !text.trim().is_empty() => text,
+                                    _ => {
+                                        debug!(
+                                            "Replace cancelled or produced no usable result; leaving the selection untouched"
+                                        );
+                                        utils::hide_recording_overlay(&ah);
+                                        set_tray_state(&ah, TrayIconState::Idle);
+                                        return;
+                                    }
+                                };
+
+                                if wav_saved {
+                                    if let Err(err) = hm.save_entry(
+                                        file_name,
+                                        instruction,
+                                        true,
+                                        Some(replacement.clone()),
+                                        Some("Xul Flow — Replace".to_string()),
+                                    ) {
+                                        error!("Failed to save history entry: {}", err);
+                                    }
+                                }
+
+                                let ah_clone = ah.clone();
+                                let paste_time = Instant::now();
+                                let rm_for_paste = Arc::clone(&rm);
+                                ah.run_on_main_thread(move || {
+                                    if rm_for_paste.was_cancelled_since(cancel_generation) {
+                                        debug!(
+                                            "Transcription operation cancelled before Replace paste"
+                                        );
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        set_tray_state(&ah_clone, TrayIconState::Idle);
+                                        return;
+                                    }
+
+                                    match utils::paste(replacement, ah_clone.clone()) {
+                                        Ok(()) => debug!(
+                                            "Replace pasted successfully in {:?}",
+                                            paste_time.elapsed()
+                                        ),
+                                        Err(e) => {
+                                            error!("Failed to paste Replace result: {}", e);
+                                            let _ = ah_clone.emit("paste-error", ());
+                                        }
+                                    }
+                                    utils::hide_recording_overlay(&ah_clone);
+                                    set_tray_state(&ah_clone, TrayIconState::Idle);
+                                })
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to run Replace paste on main thread: {:?}", e);
+                                    utils::hide_recording_overlay(&ah);
+                                    set_tray_state(&ah, TrayIconState::Idle);
+                                });
+
+                                return;
+                            }
+
+                            // Asistente trigger: same hotkey as Dictado — saying
+                            // "Xul" first (tolerating "Oye Xul", "Xul,", ...)
+                            // routes the rest through post-processing instead of
+                            // pasting the dictation as-is. Only the plain
+                            // dictation hotkey checks for this; the dedicated
+                            // Asistente hotkey ("transcribe_with_post_process")
+                            // already always post-processes and never reaches
+                            // here with `detect_selection` true.
+                            let (transcription, post_process) =
+                                match crate::audio_toolkit::strip_xul_trigger(&transcription) {
+                                    Some(instruction) if detect_selection => (instruction, true),
+                                    _ => (transcription, post_process),
+                                };
+
+                            // Fase 7 Mechanism B: "Xul, aprende que..." / "Xul,
+                            // recuerda que..." with nothing selected — teaches a
+                            // dictionary correction by voice alone. Checked before
+                            // the normal Asistente call so a teach utterance never
+                            // gets answered as if it were a question.
+                            if post_process {
+                                if let Some(clause) =
+                                    crate::audio_toolkit::strip_teach_trigger(&transcription)
+                                {
+                                    if use_streaming_overlay {
+                                        tm.emit_stream_working(StreamWorkKind::Polishing);
+                                    } else {
+                                        show_processing_overlay(&ah);
+                                    }
+
+                                    let teach_settings = get_settings(&ah);
+                                    let pair = complete_unless_cancelled(
+                                        extract_dictionary_teach(&teach_settings, &clause),
+                                        || rm.was_cancelled_since(cancel_generation),
+                                    )
+                                    .await
+                                    .flatten();
+
+                                    match &pair {
+                                        Some((from, to)) => {
+                                            let learned =
+                                                crate::settings::add_or_update_custom_dictionary_entry(
+                                                    &ah, from, to,
+                                                );
+                                            if learned {
+                                                info!(
+                                                    "Dictionary learned via voice: '{}' => '{}'",
+                                                    utils::redact_text(from),
+                                                    utils::redact_text(to)
+                                                );
+                                            } else {
+                                                debug!(
+                                                    "Dictionary teach via voice: no change (already taught or blank)"
+                                                );
+                                            }
+                                        }
+                                        None => {
+                                            debug!(
+                                                "Dictionary teach via voice: couldn't extract a correction pair"
+                                            );
+                                            crate::settings::notify_dictionary_teach_failed(&ah);
+                                        }
+                                    }
+
+                                    // Nothing to paste either way — this utterance
+                                    // was a teach instruction, not dictation or a
+                                    // question for the Asistente to answer.
+                                    if wav_saved {
+                                        if let Err(err) = hm.save_entry(
+                                            file_name,
+                                            transcription,
+                                            true,
+                                            pair.map(|(from, to)| format!("{} => {}", from, to)),
+                                            Some("Xul Flow — Aprendizaje".to_string()),
+                                        ) {
+                                            error!("Failed to save history entry: {}", err);
+                                        }
+                                    }
+                                    utils::hide_recording_overlay(&ah);
+                                    set_tray_state(&ah, TrayIconState::Idle);
+                                    return;
+                                }
+                            }
 
                             if post_process {
                                 if use_streaming_overlay {
@@ -932,11 +1532,15 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
         "transcribe".to_string(),
         Arc::new(TranscribeAction {
             post_process: false,
+            detect_selection: true,
         }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "transcribe_with_post_process".to_string(),
-        Arc::new(TranscribeAction { post_process: true }) as Arc<dyn ShortcutAction>,
+        Arc::new(TranscribeAction {
+            post_process: true,
+            detect_selection: false,
+        }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "cancel".to_string(),

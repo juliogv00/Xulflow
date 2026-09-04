@@ -1,3 +1,4 @@
+use crate::settings::{DictionaryEntry, SnippetEntry};
 use natural::phonetics::soundex;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -265,6 +266,175 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
     (prefix, suffix)
 }
 
+/// Applies user-defined "wrong → right" substitution pairs to the transcribed
+/// text (e.g. "cloud" -> "Claude Code"). Unlike `apply_custom_words` (fuzzy
+/// nearest-neighbor correction toward a vocabulary the model already produced
+/// something close to), each entry here is a literal, case-insensitive,
+/// whole-word(s) replacement the user configured explicitly, so no fuzzy
+/// matching or threshold applies — either it matches or it doesn't.
+pub fn apply_custom_dictionary(text: &str, entries: &[DictionaryEntry]) -> String {
+    if entries.is_empty() {
+        return text.to_string();
+    }
+
+    let mut result = text.to_string();
+    for entry in entries {
+        let from = entry.from.trim();
+        if from.is_empty() {
+            continue;
+        }
+        // Word-boundary, case-insensitive. `from`/`to` are user-typed, free-form
+        // text (not necessarily regex-safe), so the pattern is escaped.
+        let pattern = format!(r"(?i)\b{}\b", regex::escape(from));
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            // Pathological input (e.g. only punctuation once escaped/stripped of
+            // word chars) — skip this entry rather than fail the whole pass.
+            Err(_) => continue,
+        };
+        result = re
+            .replace_all(&result, |caps: &regex::Captures| {
+                preserve_case_pattern(&caps[0], &entry.to)
+            })
+            .into_owned();
+    }
+    result
+}
+
+/// Fase 8: a snippet expands only when its trigger is the *entire* dictated
+/// utterance — not a substring match like the custom dictionary — so saying
+/// a snippet's trigger word mid-sentence doesn't unexpectedly swap in a much
+/// longer block of text. Case-insensitive; a trailing punctuation mark the
+/// punctuation-commands step (or the ASR itself) may have added is ignored
+/// on both sides so it doesn't stop an otherwise exact match.
+pub fn apply_snippets(text: &str, entries: &[SnippetEntry]) -> String {
+    if entries.is_empty() {
+        return text.to_string();
+    }
+
+    let normalized = text
+        .trim()
+        .trim_end_matches(['.', ',', '!', '?', '¡', '¿'])
+        .trim();
+    if normalized.is_empty() {
+        return text.to_string();
+    }
+
+    for entry in entries {
+        let trigger = entry
+            .trigger
+            .trim()
+            .trim_end_matches(['.', ',', '!', '?', '¡', '¿'])
+            .trim();
+        if !trigger.is_empty() && trigger.to_lowercase() == normalized.to_lowercase() {
+            return entry.expansion.clone();
+        }
+    }
+
+    text.to_string()
+}
+
+/// Spoken punctuation commands, checked longest-phrase-first so a multi-word
+/// command (e.g. "punto y aparte") isn't shadowed by a shorter one it
+/// contains (e.g. "punto"). Fixed built-in table for v1 — not user-editable
+/// via settings, unlike the custom dictionary above.
+const PUNCTUATION_COMMANDS: &[(&str, &str)] = &[
+    ("punto y aparte", "\n\n"),
+    ("punto y coma", ";"),
+    ("signo de interrogación", "?"),
+    ("cierra interrogación", "?"),
+    ("abre interrogación", "¿"),
+    ("signo de exclamación", "!"),
+    ("cierra exclamación", "!"),
+    ("abre exclamación", "¡"),
+    ("nueva línea", "\n"),
+    ("salto de línea", "\n"),
+    ("dos puntos", ":"),
+    ("coma", ","),
+    ("punto", "."),
+    ("guion", "-"),
+    ("comillas", "\""),
+];
+
+/// Marks that open a construct — the word after them hugs them directly (no
+/// space), rather than closing/separating one, which gets exactly one
+/// trailing space so the next word doesn't run into it. A mark containing a
+/// newline supplies its own separation and needs neither.
+fn punctuation_command_trailing(mark: &str) -> &'static str {
+    if mark.contains('\n') || matches!(mark, "¿" | "¡") {
+        ""
+    } else {
+        " "
+    }
+}
+
+/// Replaces spoken punctuation commands ("coma", "punto y aparte", ...) with
+/// their symbol. Whitespace around the spoken command is swallowed and
+/// replaced with whatever spacing the mark itself needs, so "hola coma como"
+/// becomes "hola, como" rather than "hola , como".
+pub fn apply_punctuation_commands(text: &str) -> String {
+    let mut result = text.to_string();
+
+    for (phrase, mark) in PUNCTUATION_COMMANDS {
+        let opens = matches!(*mark, "¿" | "¡");
+        let pattern = if opens {
+            // Hugs the word that follows — swallow only the whitespace
+            // *after* the spoken command; leave whatever precedes it (the
+            // space separating it from the previous word) alone.
+            format!(r"(?i)\b{}\b\s*", regex::escape(phrase))
+        } else {
+            // Closes or separates — swallow whitespace on both sides so the
+            // mark doesn't end up with a stray space glued in front of it.
+            format!(r"(?i)\s*\b{}\b\s*", regex::escape(phrase))
+        };
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => continue,
+        };
+        let replacement = format!("{}{}", mark, punctuation_command_trailing(mark));
+        result = re.replace_all(&result, replacement.as_str()).into_owned();
+    }
+
+    // A command at the very end of the text (e.g. "... nos vemos punto")
+    // leaves a trailing separator with nothing after it to separate — trim it.
+    result.trim_end().to_string()
+}
+
+static XUL_TRIGGER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^\s*(?:oye[,]?\s+)?xul\b[,]?\s*").unwrap());
+
+/// Detects the Asistente voice trigger ("Xul") at the start of a dictation,
+/// tolerating a couple of natural phrasings ("Oye Xul", "Xul,"). Runs after
+/// the custom dictionary and custom-words correction have already had a
+/// chance to fix a mis-transcribed "Xul" (e.g. "Chul"), so in the common case
+/// this is just a plain prefix check — the regex's own tolerance is a second
+/// line of defense, not the primary fix.
+///
+/// Returns the remaining text (the actual instruction) with the trigger
+/// stripped, or `None` if the text doesn't start with it — the safe default
+/// that leaves the dictation alone.
+pub fn strip_xul_trigger(text: &str) -> Option<String> {
+    let m = XUL_TRIGGER_RE.find(text)?;
+    Some(text[m.end()..].to_string())
+}
+
+static TEACH_TRIGGER_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^\s*(?:que\s+)?(?:aprende|recuerda)(?:s)?(?:\s+que)?\s*[:,]?\s*").unwrap()
+});
+
+/// Detects the dictionary-teach voice trigger ("Xul, aprende que..." /
+/// "Xul, recuerda que...") within an already Xul-stripped instruction. A
+/// fixed keyword rather than free-form intent detection — reliable without
+/// an extra LLM round-trip just to guess whether the user is teaching a
+/// correction or asking something else.
+///
+/// Returns the remaining clause (what to extract a correction from), or
+/// `None` if the instruction doesn't start with the keyword.
+pub fn strip_teach_trigger(text: &str) -> Option<String> {
+    let m = TEACH_TRIGGER_RE.find(text)?;
+    Some(text[m.end()..].to_string())
+}
+
 /// Evidence for the language of the text being cleaned.
 ///
 /// This intentionally describes the transcription output, not Handy's UI
@@ -493,6 +663,162 @@ mod tests {
         let custom_words = vec![];
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_apply_custom_dictionary_replaces_literal_pair() {
+        let text = "voy a usar cloud para esto";
+        let entries = vec![DictionaryEntry {
+            id: "1".to_string(),
+            from: "cloud".to_string(),
+            to: "Claude Code".to_string(),
+        }];
+        let result = apply_custom_dictionary(text, &entries);
+        assert_eq!(result, "voy a usar Claude Code para esto");
+    }
+
+    #[test]
+    fn test_apply_custom_dictionary_is_case_insensitive_and_word_bounded() {
+        let text = "Cloud es mi herramienta, no cloudy";
+        let entries = vec![DictionaryEntry {
+            id: "1".to_string(),
+            from: "cloud".to_string(),
+            to: "Claude Code".to_string(),
+        }];
+        let result = apply_custom_dictionary(text, &entries);
+        // "Cloud" matched (case-insensitive) and re-capitalized; "cloudy"
+        // left untouched (word boundary).
+        assert_eq!(result, "Claude Code es mi herramienta, no cloudy");
+    }
+
+    #[test]
+    fn test_empty_custom_dictionary_is_noop() {
+        let text = "hola cloud";
+        let result = apply_custom_dictionary(text, &[]);
+        assert_eq!(result, "hola cloud");
+    }
+
+    #[test]
+    fn test_apply_snippets_expands_whole_utterance() {
+        let entries = vec![SnippetEntry {
+            id: "1".to_string(),
+            trigger: "firma".to_string(),
+            expansion: "Un saludo,\nJulio".to_string(),
+        }];
+        assert_eq!(apply_snippets("firma", &entries), "Un saludo,\nJulio");
+        // Case-insensitive, and tolerant of a trailing period a punctuation
+        // command (or the ASR itself) may have added.
+        assert_eq!(apply_snippets("Firma.", &entries), "Un saludo,\nJulio");
+    }
+
+    #[test]
+    fn test_apply_snippets_requires_whole_utterance_match() {
+        let entries = vec![SnippetEntry {
+            id: "1".to_string(),
+            trigger: "firma".to_string(),
+            expansion: "Un saludo,\nJulio".to_string(),
+        }];
+        let text = "la firma de este contrato es válida";
+        assert_eq!(apply_snippets(text, &entries), text);
+    }
+
+    #[test]
+    fn test_empty_snippets_is_noop() {
+        let text = "firma";
+        assert_eq!(apply_snippets(text, &[]), text);
+    }
+
+    #[test]
+    fn test_punctuation_commands_coma_and_punto() {
+        let text = "hola coma como estás punto";
+        let result = apply_punctuation_commands(text);
+        assert_eq!(result, "hola, como estás.");
+    }
+
+    #[test]
+    fn test_punctuation_commands_punto_y_aparte_not_shadowed_by_punto() {
+        let text = "primer párrafo punto y aparte segundo párrafo";
+        let result = apply_punctuation_commands(text);
+        assert_eq!(result, "primer párrafo\n\nsegundo párrafo");
+    }
+
+    #[test]
+    fn test_punctuation_commands_opening_question_mark_hugs_next_word() {
+        let text = "te pregunto abre interrogación cómo estás signo de interrogación";
+        let result = apply_punctuation_commands(text);
+        assert_eq!(result, "te pregunto ¿cómo estás?");
+    }
+
+    #[test]
+    fn test_strip_xul_trigger_plain() {
+        assert_eq!(
+            strip_xul_trigger("Xul qué hora es en Tokio"),
+            Some("qué hora es en Tokio".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_xul_trigger_with_comma_and_greeting() {
+        assert_eq!(
+            strip_xul_trigger("Oye Xul, resume esto"),
+            Some("resume esto".to_string())
+        );
+        assert_eq!(
+            strip_xul_trigger("Xul, cómo estás"),
+            Some("cómo estás".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_xul_trigger_case_insensitive() {
+        assert_eq!(
+            strip_xul_trigger("XUL enciende la luz"),
+            Some("enciende la luz".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_xul_trigger_absent_leaves_dictation_alone() {
+        assert_eq!(strip_xul_trigger("recuérdame comprar leche"), None);
+        // Not a word-boundary match — "Xultra" isn't "Xul".
+        assert_eq!(strip_xul_trigger("Xultra es una marca"), None);
+    }
+
+    #[test]
+    fn test_strip_teach_trigger_plain() {
+        assert_eq!(
+            strip_teach_trigger("aprende que Chul se escribe Xul"),
+            Some("Chul se escribe Xul".to_string())
+        );
+        assert_eq!(
+            strip_teach_trigger("recuerda que cloud es Claude Code"),
+            Some("cloud es Claude Code".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_teach_trigger_without_que_or_punctuation() {
+        assert_eq!(
+            strip_teach_trigger("Aprende: Chul se escribe Xul"),
+            Some("Chul se escribe Xul".to_string())
+        );
+        assert_eq!(
+            strip_teach_trigger("recuerdas que esto es así"),
+            Some("esto es así".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_teach_trigger_absent_leaves_instruction_alone() {
+        assert_eq!(strip_teach_trigger("cuál es la capital de Francia"), None);
+        assert_eq!(strip_teach_trigger("aprendizaje automático"), None);
+    }
+
+    #[test]
+    fn test_punctuation_commands_nueva_linea() {
+        let text = "primera línea nueva línea segunda línea";
+        let result = apply_punctuation_commands(text);
+        assert_eq!(result, "primera línea\nsegunda línea");
     }
 
     #[test]
