@@ -1,3 +1,4 @@
+use crate::audio_toolkit::constants::WHISPER_SAMPLE_RATE;
 use crate::audio_toolkit::{
     apply_custom_dictionary, apply_custom_words, apply_punctuation_commands, apply_snippets,
     detect_output_language, normalize_transcription_output, remove_filler_words,
@@ -1331,17 +1332,33 @@ impl TranscriptionManager {
                             run_options.family.is_some()
                         );
 
-                        session
-                            .run(&audio, &run_options)
-                            .map(|t| {
-                                // Whisper's audio-based LID (auto mode only;
-                                // `None` when a language hint was passed).
-                                model_detected_language = t.language;
-                                t.text
-                            })
-                            .map_err(|e| {
+                        let chunks = if truncates_long_audio(&active_model) {
+                            split_long_audio(&audio)
+                        } else {
+                            vec![&audio[..]]
+                        };
+                        if chunks.len() > 1 {
+                            debug!(
+                                "Splitting {:.1}s of audio into {} chunks for '{}'",
+                                audio.len() as f32 / WHISPER_SAMPLE_RATE as f32,
+                                chunks.len(),
+                                active_model
+                            );
+                        }
+                        let mut texts = Vec::with_capacity(chunks.len());
+                        for chunk in chunks {
+                            let t = session.run(chunk, &run_options).map_err(|e| {
                                 anyhow::anyhow!("transcribe-cpp transcription failed: {}", e)
-                            })
+                            })?;
+                            // Whisper's audio-based LID (auto mode only;
+                            // `None` when a language hint was passed).
+                            model_detected_language = t.language;
+                            let text = t.text.trim().to_string();
+                            if !text.is_empty() {
+                                texts.push(text);
+                            }
+                        }
+                        Ok(texts.join(" "))
                     }
                     LoadedEngine::Parakeet(parakeet_engine) => {
                         let params = ParakeetParams {
@@ -1719,6 +1736,57 @@ fn with_model_detected_language(
         }
         (evidence, _) => evidence,
     }
+}
+
+/// Model families that silently drop audio past their training window
+/// (~40 s): measured on a 76 s dictation, Canary 180M returned 58% of the text
+/// with a sentence repeated, Canary 1B returned nothing at all on 85 s, and
+/// Cohere stopped at ~45 s. Whisper, Parakeet, Nemotron, Qwen3-ASR and Granite
+/// handled the same audio whole, so only these are split.
+fn truncates_long_audio(model_id: &str) -> bool {
+    let id = model_id.to_ascii_lowercase();
+    id.contains("canary") || id.contains("cohere")
+}
+
+/// Longest chunk sent to a model that truncates long audio.
+const MAX_CHUNK_SECS: usize = 25;
+/// Earliest point at which a chunk may be cut, so the search for a pause has
+/// room and chunks don't end up needlessly short.
+const MIN_CHUNK_SECS: usize = 12;
+/// Window over which loudness is measured when looking for a pause to cut at.
+const PAUSE_WINDOW_MS: usize = 200;
+
+/// Splits audio longer than `MAX_CHUNK_SECS` into consecutive chunks, cutting
+/// each one at the quietest moment between `MIN_CHUNK_SECS` and
+/// `MAX_CHUNK_SECS` so a word is not sliced in half. Every sample ends up in
+/// exactly one chunk.
+fn split_long_audio(audio: &[f32]) -> Vec<&[f32]> {
+    let rate = WHISPER_SAMPLE_RATE as usize;
+    let max_len = MAX_CHUNK_SECS * rate;
+    let min_len = MIN_CHUNK_SECS * rate;
+    let window = PAUSE_WINDOW_MS * rate / 1000;
+
+    let mut chunks = Vec::new();
+    let mut rest = audio;
+    while rest.len() > max_len {
+        let quietest_start = (min_len..=max_len - window)
+            .step_by(window / 2)
+            .min_by(|&a, &b| {
+                let energy = |start: usize| -> f32 {
+                    rest[start..start + window].iter().map(|s| s * s).sum()
+                };
+                energy(a).total_cmp(&energy(b))
+            })
+            .unwrap_or(max_len - window);
+        let cut = quietest_start + window / 2;
+        let (chunk, tail) = rest.split_at(cut);
+        chunks.push(chunk);
+        rest = tail;
+    }
+    if !rest.is_empty() {
+        chunks.push(rest);
+    }
+    chunks
 }
 
 struct TranscribeCppRunPlan {
@@ -2160,6 +2228,35 @@ mod tests {
 
     fn languages(codes: &[&str]) -> Vec<String> {
         codes.iter().map(|code| (*code).to_string()).collect()
+    }
+
+    #[test]
+    fn long_audio_is_split_at_a_pause_without_losing_samples() {
+        let rate = WHISPER_SAMPLE_RATE as usize;
+        // 64 s of "speech" with a half-second pause at 20 s and at 42 s.
+        let mut audio = vec![0.5_f32; 64 * rate];
+        for pause_start in [20 * rate, 42 * rate] {
+            audio[pause_start..pause_start + rate / 2].fill(0.0);
+        }
+        let chunks = split_long_audio(&audio);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.iter().map(|c| c.len()).sum::<usize>(), audio.len());
+        assert!(chunks.iter().all(|c| c.len() <= MAX_CHUNK_SECS * rate));
+        // The first cut lands inside the pause, not mid-"word".
+        let first_cut = chunks[0].len();
+        assert!((20 * rate..20 * rate + rate / 2).contains(&first_cut));
+    }
+
+    #[test]
+    fn short_audio_and_safe_models_are_not_split() {
+        let audio = vec![0.5_f32; 20 * WHISPER_SAMPLE_RATE as usize];
+        assert_eq!(split_long_audio(&audio).len(), 1);
+        assert!(truncates_long_audio(
+            "handy-computer/canary-180m-flash-gguf/canary-180m-flash-Q8_0.gguf"
+        ));
+        assert!(!truncates_long_audio(
+            "handy-computer/parakeet-tdt-0.6b-v3-gguf/parakeet-tdt-0.6b-v3-Q8_0.gguf"
+        ));
     }
 
     #[test]

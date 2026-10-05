@@ -1362,7 +1362,10 @@ pub fn notify_dictionary_teach_failed(app: &AppHandle) {
         .body("Prueba a reformular la corrección, p. ej. \"Xul, aprende que X se escribe Y\".")
         .show()
     {
-        warn!("Failed to show dictionary-teach-failed notification: {}", err);
+        warn!(
+            "Failed to show dictionary-teach-failed notification: {}",
+            err
+        );
     }
 }
 

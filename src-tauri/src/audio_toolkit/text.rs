@@ -60,6 +60,11 @@ fn is_supported_fuzzy_key(key: &str) -> bool {
     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+/// Largest normalized edit distance that may still receive the Soundex boost.
+/// Covers genuine mishearings ("chargeb" → "chargebee" = 0.22) while rejecting
+/// unrelated words that merely share a Soundex code ("queno" → "qwen" = 0.4).
+const MAX_PHONETIC_EDIT_SCORE: f64 = 0.34;
+
 fn supports_soundex(key: &str) -> bool {
     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphabetic())
 }
@@ -117,8 +122,11 @@ fn find_best_match<'a>(
             && supports_soundex(&custom_word_key.key)
             && soundex(candidate, &custom_word_key.key);
 
-        // Combine scores: favor phonetic matches, but also consider string similarity
-        let combined_score = if phonetic_match {
+        // Combine scores: favor phonetic matches, but also consider string similarity.
+        // Soundex is coarse and English-centric, so the boost only applies when
+        // the spelling is already plausibly close: without this cap, Spanish
+        // "que no" ("queno", Q500) became "Qwen" (Q500) at a 0.4 edit score.
+        let combined_score = if phonetic_match && levenshtein_score <= MAX_PHONETIC_EDIT_SCORE {
             levenshtein_score * 0.3 // Give significant boost to phonetic matches
         } else {
             levenshtein_score
@@ -285,7 +293,31 @@ pub fn apply_custom_dictionary(text: &str, entries: &[DictionaryEntry]) -> Strin
         }
         // Word-boundary, case-insensitive. `from`/`to` are user-typed, free-form
         // text (not necessarily regex-safe), so the pattern is escaped.
-        let pattern = format!(r"(?i)\b{}\b", regex::escape(from));
+        //
+        // When `to` has more words than `from` ("cloud" → "Claude Code") and
+        // the model already wrote the rest ("Cloud Code"), the match swallows
+        // that tail so the result isn't "Claude Code Code".
+        let from_word_count = from.split_whitespace().count();
+        let to_words: Vec<&str> = entry.to.split_whitespace().collect();
+        let tails: Vec<String> = (1..=to_words.len().saturating_sub(from_word_count))
+            .rev()
+            .map(|len| {
+                to_words[to_words.len() - len..]
+                    .iter()
+                    .map(|word| regex::escape(word))
+                    .collect::<Vec<_>>()
+                    .join(r"\s+")
+            })
+            .collect();
+        let pattern = if tails.is_empty() {
+            format!(r"(?i)\b{}\b", regex::escape(from))
+        } else {
+            format!(
+                r"(?i)\b{}\b(?:\s+(?:{})\b)?",
+                regex::escape(from),
+                tails.join("|")
+            )
+        };
         let re = match Regex::new(&pattern) {
             Ok(re) => re,
             // Pathological input (e.g. only punctuation once escaped/stripped of
@@ -689,6 +721,39 @@ mod tests {
         // "Cloud" matched (case-insensitive) and re-capitalized; "cloudy"
         // left untouched (word boundary).
         assert_eq!(result, "Claude Code es mi herramienta, no cloudy");
+    }
+
+    #[test]
+    fn test_apply_custom_dictionary_does_not_duplicate_existing_tail() {
+        let entries = vec![DictionaryEntry {
+            id: "1".to_string(),
+            from: "cloud".to_string(),
+            to: "Claude Code".to_string(),
+        }];
+        assert_eq!(
+            apply_custom_dictionary("un límite a Cloud Code para que", &entries),
+            "un límite a Claude Code para que"
+        );
+        // Only the replacement's own tail is swallowed, not any next word.
+        assert_eq!(
+            apply_custom_dictionary("abre cloud ahora", &entries),
+            "abre Claude Code ahora"
+        );
+    }
+
+    #[test]
+    fn test_apply_custom_words_ignores_soundex_only_lookalikes() {
+        // "que no" → "queno" shares Soundex Q500 with "Qwen" but is spelled
+        // nothing like it; it must survive untouched.
+        let custom_words = vec!["Qwen".to_string()];
+        assert_eq!(
+            apply_custom_words(
+                "un límite para que no se consuma todos los tokens",
+                &custom_words,
+                0.18
+            ),
+            "un límite para que no se consuma todos los tokens"
+        );
     }
 
     #[test]

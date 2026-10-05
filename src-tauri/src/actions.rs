@@ -258,7 +258,10 @@ async fn process_replace_instruction(
             None
         }
         Err(e) => {
-            error!("Replace failed for provider '{}': {}", resolved.provider.id, e);
+            error!(
+                "Replace failed for provider '{}': {}",
+                resolved.provider.id, e
+            );
             None
         }
     }
@@ -279,7 +282,10 @@ fn looks_hallucinated(to: &str) -> bool {
 /// (already stripped of "Xul, aprende que..."). Returns `None` on any
 /// failure — HTTP error, unconfigured provider, or the model answering
 /// `XULFLOW_DICT: ERROR` because it couldn't parse two clear parts.
-async fn extract_dictionary_teach(settings: &AppSettings, clause: &str) -> Option<(String, String)> {
+async fn extract_dictionary_teach(
+    settings: &AppSettings,
+    clause: &str,
+) -> Option<(String, String)> {
     let resolved = resolve_active_provider(settings, "Dictionary teach")?;
 
     debug!(
@@ -308,7 +314,10 @@ async fn extract_dictionary_teach(settings: &AppSettings, clause: &str) -> Optio
             let (from, to) = rest.split_once("=>")?;
             let (from, to) = (from.trim(), to.trim());
             if from.is_empty() || to.is_empty() || looks_hallucinated(to) {
-                debug!("Dictionary teach: rejecting suspect extraction '{}' => '{}'", from, to);
+                debug!(
+                    "Dictionary teach: rejecting suspect extraction '{}' => '{}'",
+                    from, to
+                );
                 return None;
             }
             debug!("Dictionary teach extracted '{}' => '{}'", from, to);
@@ -1147,11 +1156,12 @@ impl ShortcutAction for TranscribeAction {
                                         return;
                                     };
 
-                                    let learned = crate::settings::add_or_update_custom_dictionary_entry(
-                                        &ah,
-                                        &selected_text,
-                                        &to,
-                                    );
+                                    let learned =
+                                        crate::settings::add_or_update_custom_dictionary_entry(
+                                            &ah,
+                                            &selected_text,
+                                            &to,
+                                        );
                                     if learned {
                                         info!(
                                             "Dictionary learned via Replace: '{}' => '{}'",
