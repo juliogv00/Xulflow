@@ -12,14 +12,14 @@ const Badge: React.FC<BadgeProps> = ({
   className = "",
 }) => {
   const variantClasses = {
-    primary: "bg-logo-primary",
-    success: "bg-green-500/20 text-green-400",
-    secondary: "bg-mid-gray/20 text-text/70",
+    primary: "bg-logo-primary text-white",
+    success: "bg-green-600/10 text-green-800",
+    secondary: "bg-black/5 text-text/70",
   };
 
   return (
     <span
-      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-normal ${variantClasses[variant]} ${className}`}
     >
       {children}
     </span>

@@ -101,7 +101,7 @@
     },
     "permissions": {
       "title": "Autorisations requises",
-      "description": "Xul Flow a besoin de quelques autorisations pour fonctionner correctement.",
+      "description": "VMNTe flow a besoin de quelques autorisations pour fonctionner correctement.",
       "microphone": {
         "title": "Accès au microphone",
         "description": "Nécessaire pour entendre votre voix pour la transcription."
@@ -175,13 +175,13 @@
       "searchPlaceholder": "Rechercher des modèles par nom…",
       "rescan": {
         "label": "Réanalyser",
-        "tooltip": "Réanalyser pour détecter les modèles ajoutés au dossier des modèles ou au cache Hugging Face en dehors de Xul Flow"
+        "tooltip": "Réanalyser pour détecter les modèles ajoutés au dossier des modèles ou au cache Hugging Face en dehors de VMNTe flow"
       }
     },
     "general": {
       "title": "Général",
       "shortcut": {
-        "title": "Raccourcis Xul Flow",
+        "title": "Raccourcis VMNTe flow",
         "description": "Configurer les raccourcis clavier pour déclencher l'enregistrement de la reconnaissance vocale",
         "loading": "Chargement des raccourcis...",
         "none": "Aucun raccourci configuré",
@@ -293,11 +293,11 @@
       },
       "autostart": {
         "label": "Lancer au démarrage",
-        "description": "Démarrer automatiquement Xul Flow lorsque vous vous connectez à votre ordinateur."
+        "description": "Démarrer automatiquement VMNTe flow lorsque vous vous connectez à votre ordinateur."
       },
       "showTrayIcon": {
         "label": "Afficher l'icône de la barre",
-        "description": "Afficher l'icône de Xul Flow dans la barre système."
+        "description": "Afficher l'icône de VMNTe flow dans la barre système."
       },
       "overlay": {
         "style": {
@@ -492,7 +492,7 @@
       },
       "updateChecks": {
         "label": "Vérifier les mises à jour",
-        "description": "Vérifier automatiquement les nouvelles versions de Xul Flow",
+        "description": "Vérifier automatiquement les nouvelles versions de VMNTe flow",
         "lockedDescription": "Désactivé par la configuration système (HANDY_DISABLE_UPDATER)"
       },
       "soundTheme": {
@@ -570,7 +570,7 @@
       },
       "keyboardDiagnostic": {
         "title": "Diagnostic du clavier",
-        "description": "Vérifie si les événements clavier atteignent Xul Flow. Seul le nombre d'événements est enregistré, jamais les touches sur lesquelles vous appuyez.",
+        "description": "Vérifie si les événements clavier atteignent VMNTe flow. Seul le nombre d'événements est enregistré, jamais les touches sur lesquelles vous appuyez.",
         "run": "Lancer un diagnostic de 10 s",
         "running": "Écoute en cours… appuyez plusieurs fois sur votre raccourci (par ex. Option+Space)",
         "secureInputLabel": "Secure Input",
@@ -584,7 +584,7 @@
         "mouse": "Souris",
         "verdictBlocked": "Secure Input bloque les événements clavier : les raccourcis contenant une touche normale ne peuvent pas fonctionner tant que ce n'est pas résolu.",
         "verdictSuspicious": "Des événements de modificateurs sont arrivés, mais aucun événement de touche : quelque chose supprime les touches alors que Secure Input est signalé comme désactivé. Merci de le signaler sur GitHub.",
-        "verdictOk": "Les événements clavier atteignent Xul Flow normalement.",
+        "verdictOk": "Les événements clavier atteignent VMNTe flow normalement.",
         "verdictNoEvents": "Aucun événement capturé : avez-vous appuyé sur des touches pendant le test ?",
         "failed": "Échec du diagnostic : {{error}}"
       },
@@ -600,11 +600,11 @@
       "title": "À propos",
       "version": {
         "title": "Version",
-        "description": "Version actuelle de Xul Flow"
+        "description": "Version actuelle de VMNTe flow"
       },
       "appDataDirectory": {
         "title": "Emplacement des données de l'application",
-        "description": "Emplacement où Xul Flow stocke ses données"
+        "description": "Emplacement où VMNTe flow stocke ses données"
       },
       "sourceCode": {
         "title": "Code source",
@@ -613,7 +613,7 @@
       },
       "supportDevelopment": {
         "title": "Soutenir le développement",
-        "description": "Aidez-nous à continuer à construire Xul Flow",
+        "description": "Aidez-nous à continuer à construire VMNTe flow",
         "button": "Faire un don"
       },
       "acknowledgments": {
@@ -621,12 +621,12 @@
         "ggml": {
           "title": "ggml",
           "description": "Inférence haute performance du modèle de reconnaissance vocale automatique Whisper d'OpenAI",
-          "details": "Xul Flow utilise ggml pour un traitement rapide et local de la parole en texte. Merci au travail incroyable de Georgi Gerganov et des contributeurs."
+          "details": "VMNTe flow utilise ggml pour un traitement rapide et local de la parole en texte. Merci au travail incroyable de Georgi Gerganov et des contributeurs."
         }
       },
       "whatsNewUpdates": {
         "label": "Afficher les nouveautés",
-        "description": "Afficher les notes de version après les mises à jour de Xul Flow"
+        "description": "Afficher les notes de version après les mises à jour de VMNTe flow"
       }
     }
   },
@@ -655,7 +655,7 @@
     "noOptionsFound": "Aucune option trouvée"
   },
   "accessibility": {
-    "permissionsDescription": "Xul Flow a besoin des autorisations d'accessibilité pour taper le texte transcrit.",
+    "permissionsDescription": "VMNTe flow a besoin des autorisations d'accessibilité pour taper le texte transcrit.",
     "openSettings": "Ouvrir les Préférences Système"
   },
   "errors": {
@@ -678,11 +678,11 @@
   },
   "appLanguage": {
     "title": "Langue de l'application",
-    "description": "Changer la langue de l'interface de Xul Flow"
+    "description": "Changer la langue de l'interface de VMNTe flow"
   },
   "theme": {
     "title": "Thème de l'application",
-    "description": "Choisissez si Xul Flow suit le thème du système ou reste clair ou sombre",
+    "description": "Choisissez si VMNTe flow suit le thème du système ou reste clair ou sombre",
     "options": {
       "system": "Système",
       "light": "Clair",
@@ -694,7 +694,7 @@
     "processing": "Traitement..."
   },
   "whatsNew": {
-    "title": "Nouveautés de Xul Flow v{{version}}"
+    "title": "Nouveautés de VMNTe flow v{{version}}"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} bloque peut-être 1 raccourci",

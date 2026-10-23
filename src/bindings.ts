@@ -1145,7 +1145,7 @@ export type ShortcutBinding = { id: string; name: string; description: string; d
  * See `apply_snippets` in audio_toolkit/text.rs.
  */
 export type SnippetEntry = { id: string; trigger: string; expansion: string }
-export type SoundTheme = "marimba" | "pop" | "custom"
+export type SoundTheme = "marimba" | "pop" | "droplet" | "silk" | "wood" | "orbit" | "air" | "pulse" | "custom"
 /**
  * Phase of the streaming overlay card, emitted to drive its UI state.
  */

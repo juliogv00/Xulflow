@@ -1,4 +1,6 @@
 import React from "react";
+import { VoiceHero } from "@/components/shared/VoiceHero";
+import { SoundPicker } from "../SoundPicker";
 import { useTranslation } from "react-i18next";
 import { type } from "@tauri-apps/plugin-os";
 import { MicrophoneSelector } from "../MicrophoneSelector";
@@ -19,6 +21,7 @@ export const GeneralSettings: React.FC = () => {
   const isLinux = type() === "linux";
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
+      <VoiceHero />
       <SettingsGroup title={t("settings.general.title")}>
         <ShortcutInput shortcutId="transcribe" grouped={true} />
         <ShortcutActivationSetting descriptionMode="tooltip" grouped={true} />
@@ -31,6 +34,10 @@ export const GeneralSettings: React.FC = () => {
         <ChannelSelector descriptionMode="tooltip" grouped={true} />
         <MuteWhileRecording descriptionMode="tooltip" grouped={true} />
         <AudioFeedback descriptionMode="tooltip" grouped={true} />
+        <SoundPicker
+          label={t("brand.soundTheme")}
+          description={t("brand.soundDescription")}
+        />
         <OutputDeviceSelector
           descriptionMode="tooltip"
           grouped={true}

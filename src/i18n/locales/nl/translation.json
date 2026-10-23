@@ -16,7 +16,7 @@
     "postProcessing": "Naverwerking",
     "history": "Geschiedenis",
     "debug": "Probleemoplossing",
-    "about": "Over Xul Flow"
+    "about": "Over VMNTe flow"
   },
   "onboarding": {
     "subtitle": "Kies een transcriptiemodel om aan de slag te gaan",
@@ -101,7 +101,7 @@
     },
     "permissions": {
       "title": "Machtigingen vereist",
-      "description": "Xul Flow heeft een aantal machtigingen nodig om goed te kunnen werken.",
+      "description": "VMNTe flow heeft een aantal machtigingen nodig om goed te kunnen werken.",
       "microphone": {
         "title": "Microfoontoegang",
         "description": "Vereist om je stem op te nemen voor transcriptie."
@@ -225,7 +225,7 @@
       },
       "rescan": {
         "label": "Opnieuw scannen",
-        "tooltip": "Scannen naar modellen die buiten Xul Flow om zijn toegevoegd aan de modellenmap of Hugging Face-cache"
+        "tooltip": "Scannen naar modellen die buiten VMNTe flow om zijn toegevoegd aan de modellenmap of Hugging Face-cache"
       },
       "noModelsMatch": "Geen modellen voldoen aan dit filter."
     },
@@ -293,11 +293,11 @@
       },
       "autostart": {
         "label": "Starten bij opstarten",
-        "description": "Xul Flow automatisch starten zodra je inlogt op je computer."
+        "description": "VMNTe flow automatisch starten zodra je inlogt op je computer."
       },
       "showTrayIcon": {
         "label": "Pictogram in systeemvak tonen",
-        "description": "Toon het Xul Flow-pictogram in het systeemvak."
+        "description": "Toon het VMNTe flow-pictogram in het systeemvak."
       },
       "overlay": {
         "style": {
@@ -492,7 +492,7 @@
       },
       "updateChecks": {
         "label": "Controleren op updates",
-        "description": "Automatisch controleren op nieuwe versies van Xul Flow",
+        "description": "Automatisch controleren op nieuwe versies van VMNTe flow",
         "lockedDescription": "Uitgeschakeld door systeemconfiguratie (HANDY_DISABLE_UPDATER)"
       },
       "whatsNewPreview": {
@@ -577,7 +577,7 @@
       },
       "keyboardDiagnostic": {
         "title": "Toetsenborddiagnose",
-        "description": "Controleert of toetsenbordgebeurtenissen Xul Flow bereiken. Alleen het aantal gebeurtenissen wordt vastgelegd — nooit welke toetsen je indrukt.",
+        "description": "Controleert of toetsenbordgebeurtenissen VMNTe flow bereiken. Alleen het aantal gebeurtenissen wordt vastgelegd — nooit welke toetsen je indrukt.",
         "run": "Diagnose van 10 s uitvoeren",
         "running": "Luisteren… druk je sneltoets een paar keer in (bijv. Option+Space)",
         "secureInputLabel": "Secure Input",
@@ -591,24 +591,24 @@
         "mouse": "Muis",
         "verdictBlocked": "Secure Input blokkeert toetsgebeurtenissen — sneltoetsen met een gewone toets kunnen pas weer werken als dit is opgelost.",
         "verdictSuspicious": "Er kwamen wel modificatiegebeurtenissen binnen, maar geen toetsgebeurtenissen — iets onderdrukt toetsen terwijl Secure Input als uitgeschakeld wordt gemeld. Meld dit op GitHub.",
-        "verdictOk": "Toetsgebeurtenissen bereiken Xul Flow normaal.",
+        "verdictOk": "Toetsgebeurtenissen bereiken VMNTe flow normaal.",
         "verdictNoEvents": "Geen gebeurtenissen vastgelegd — heb je tijdens de test toetsen ingedrukt?",
         "failed": "Diagnose mislukt: {{error}}"
       }
     },
     "about": {
-      "title": "Over Xul Flow",
+      "title": "Over VMNTe flow",
       "version": {
         "title": "Versie",
-        "description": "Huidige versie van Xul Flow"
+        "description": "Huidige versie van VMNTe flow"
       },
       "whatsNewUpdates": {
         "label": "Toon 'Wat is er nieuw'",
-        "description": "Release-notes tonen nadat Xul Flow is bijgewerkt"
+        "description": "Release-notes tonen nadat VMNTe flow is bijgewerkt"
       },
       "appDataDirectory": {
         "title": "App-datamap",
-        "description": "Locatie waar Xul Flow de gegevens opslaat"
+        "description": "Locatie waar VMNTe flow de gegevens opslaat"
       },
       "sourceCode": {
         "title": "Broncode",
@@ -617,7 +617,7 @@
       },
       "supportDevelopment": {
         "title": "Ontwikkeling ondersteunen",
-        "description": "Help ons om te blijven bouwen aan Xul Flow",
+        "description": "Help ons om te blijven bouwen aan VMNTe flow",
         "button": "Doneren"
       },
       "acknowledgments": {
@@ -625,7 +625,7 @@
         "ggml": {
           "title": "ggml",
           "description": "Krachtige tensorbibliotheek voor lokale AI-verwerking",
-          "details": "Xul Flow's lokale spraak-naar-tekst is gebouwd op transcribe.cpp en ggml. Met dank aan het geweldige werk van Georgi Gerganov en alle bijdragers."
+          "details": "VMNTe flow's lokale spraak-naar-tekst is gebouwd op transcribe.cpp en ggml. Met dank aan het geweldige werk van Georgi Gerganov en alle bijdragers."
         }
       }
     }
@@ -646,7 +646,7 @@
     "portableUpdateBrowseButton": "GitHub Releases openen"
   },
   "whatsNew": {
-    "title": "Nieuw in Xul Flow v{{version}}"
+    "title": "Nieuw in VMNTe flow v{{version}}"
   },
   "common": {
     "loading": "Laden...",
@@ -658,7 +658,7 @@
     "noOptionsFound": "Geen opties gevonden"
   },
   "accessibility": {
-    "permissionsDescription": "Xul Flow heeft toegankelijkheidsmachtigingen nodig om getranscribeerde tekst te kunnen typen.",
+    "permissionsDescription": "VMNTe flow heeft toegankelijkheidsmachtigingen nodig om getranscribeerde tekst te kunnen typen.",
     "openSettings": "Systeeminstellingen openen"
   },
   "errors": {
@@ -681,11 +681,11 @@
   },
   "appLanguage": {
     "title": "Interfacetaal",
-    "description": "Wijzig de taal van de Xul Flow-interface"
+    "description": "Wijzig de taal van de VMNTe flow-interface"
   },
   "theme": {
     "title": "App-thema",
-    "description": "Kies of Xul Flow het systeemthema volgt of licht of donker blijft",
+    "description": "Kies of VMNTe flow het systeemthema volgt of licht of donker blijft",
     "options": {
       "system": "Systeem",
       "light": "Licht",

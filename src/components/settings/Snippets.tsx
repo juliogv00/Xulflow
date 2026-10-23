@@ -125,9 +125,7 @@ export const Snippets: React.FC<SnippetsProps> = React.memo(
                 className="flex items-start justify-between gap-2 py-1 border-b border-mid-gray/10 last:border-b-0"
               >
                 <div className="min-w-0 flex-1">
-                  <span className="font-semibold text-sm">
-                    {entry.trigger}
-                  </span>
+                  <span className="font-semibold text-sm">{entry.trigger}</span>
                   <p className="text-xs text-mid-gray truncate">
                     {entry.expansion}
                   </p>

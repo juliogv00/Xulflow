@@ -140,3 +140,44 @@ fn play_audio_file(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rodio::Source;
+
+    #[test]
+    fn every_bundled_signature_survives_settings_and_decodes() {
+        for id in [
+            "marimba", "pop", "droplet", "silk", "wood", "orbit", "air", "pulse",
+        ] {
+            let settings: AppSettings = serde_json::from_value(serde_json::json!({
+                "sound_theme": id,
+            }))
+            .expect("sound theme must survive loading saved settings");
+            assert_eq!(serde_json::to_value(settings.sound_theme).unwrap(), id);
+            for sound_type in [SoundType::Start, SoundType::Stop] {
+                let is_start = matches!(sound_type, SoundType::Start);
+                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join(get_sound_path(&settings, sound_type));
+                let source =
+                    rodio::Decoder::try_from(File::open(&path).expect("bundled sound exists"))
+                        .expect("playback decoder accepts sound");
+                assert_eq!(source.sample_rate(), 48_000);
+                assert_eq!(source.channels(), 1);
+                let samples: Vec<f32> = source.collect();
+                let duration = samples.len() as f32 / 48_000.0;
+                assert!(duration > 0.1 && duration <= if is_start { 0.2 } else { 0.3 });
+                let peak = samples
+                    .iter()
+                    .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+                assert!(
+                    (0.23..0.25).contains(&peak),
+                    "quiet, consistent peaks without clipping"
+                );
+                assert!(samples.first().unwrap().abs() < 0.001);
+                assert!(samples.last().unwrap().abs() < 0.001);
+            }
+        }
+    }
+}

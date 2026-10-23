@@ -277,6 +277,12 @@ impl ModelUnloadTimeout {
 pub enum SoundTheme {
     Marimba,
     Pop,
+    Droplet,
+    Silk,
+    Wood,
+    Orbit,
+    Air,
+    Pulse,
     Custom,
 }
 
@@ -285,6 +291,12 @@ impl SoundTheme {
         match self {
             SoundTheme::Marimba => "marimba",
             SoundTheme::Pop => "pop",
+            SoundTheme::Droplet => "droplet",
+            SoundTheme::Silk => "silk",
+            SoundTheme::Wood => "wood",
+            SoundTheme::Orbit => "orbit",
+            SoundTheme::Air => "air",
+            SoundTheme::Pulse => "pulse",
             SoundTheme::Custom => "custom",
         }
     }
@@ -843,7 +855,7 @@ fn default_custom_words() -> Vec<String> {
         "Ollama".to_string(),
         "qwen-fable".to_string(),
         "Xul".to_string(),
-        "Xul Flow".to_string(),
+        "VMNTe flow".to_string(),
         "VMNTe".to_string(),
     ]
 }

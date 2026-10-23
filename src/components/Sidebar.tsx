@@ -1,8 +1,17 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Cog, FlaskConical, History, Info, Sparkles, Cpu } from "lucide-react";
+import {
+  Cog,
+  FlaskConical,
+  History,
+  Info,
+  Sparkles,
+  Cpu,
+  AudioLines,
+  ArrowUpRight,
+} from "lucide-react";
 import XulFlowLogotype from "./icons/XulFlowLogotype";
-import XulFlowIsotipo from "./icons/XulFlowIsotipo";
+import type { AppSettings } from "@/bindings";
 import { useSettings } from "../hooks/useSettings";
 import {
   GeneralSettings,
@@ -21,20 +30,19 @@ interface IconProps {
   height?: number | string;
   size?: number | string;
   className?: string;
-  [key: string]: any;
 }
 
 interface SectionConfig {
   labelKey: string;
   icon: React.ComponentType<IconProps>;
   component: React.ComponentType;
-  enabled: (settings: any) => boolean;
+  enabled: (settings: AppSettings | null) => boolean;
 }
 
 export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
-    icon: XulFlowIsotipo,
+    icon: AudioLines,
     component: GeneralSettings,
     enabled: () => true,
   },
@@ -93,34 +101,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
 
   return (
-    <div className="flex flex-col w-40 h-full border-e border-mid-gray/20 items-center px-2">
-      <XulFlowLogotype width={84} className="mt-7 mb-5" />
-      <div className="flex flex-col w-full items-center gap-1 pt-2 border-t border-mid-gray/20">
+    <aside className="app-sidebar">
+      <button
+        className="brand-lockup"
+        onClick={() => onSectionChange("general")}
+        aria-label={t("brand.home")}
+      >
+        <XulFlowLogotype width={52} />
+        <span className="brand-lockup__by">{t("brand.byline")}</span>
+      </button>
+      <span className="sidebar-caption">{t("brand.workspace")}</span>
+      <nav className="sidebar-nav" aria-label={t("brand.navigation")}>
         {availableSections.map((section) => {
           const Icon = section.icon;
           const isActive = activeSection === section.id;
-
           return (
-            <div
+            <button
               key={section.id}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${
-                isActive
-                  ? "bg-logo-primary/80"
-                  : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
-              }`}
+              className={`sidebar-link ${isActive ? "is-active" : ""}`}
+              aria-label={t(section.labelKey)}
+              title={t(section.labelKey)}
+              aria-current={isActive ? "page" : undefined}
               onClick={() => onSectionChange(section.id)}
             >
-              <Icon width={24} height={24} className="shrink-0" />
-              <p
-                className="text-sm font-medium truncate"
-                title={t(section.labelKey)}
-              >
-                {t(section.labelKey)}
-              </p>
-            </div>
+              <Icon width={18} height={18} className="shrink-0" />
+              <span>{t(section.labelKey)}</span>
+              {isActive && <span className="sidebar-link__dot" />}
+            </button>
           );
         })}
+      </nav>
+      <div className="sidebar-note">
+        <span className="sidebar-note__symbol" aria-hidden="true">
+          ✳
+        </span>
+        <p>{t("brand.sidebarNote")}</p>
+        <span>
+          {t("brand.madeBy")}
+          <ArrowUpRight size={12} />
+        </span>
       </div>
-    </div>
+    </aside>
   );
 };

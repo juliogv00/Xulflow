@@ -1,3 +1,13 @@
+# VMNTe flow
+
+VMNTe flow is VMNTe’s desktop dictation app, built on [Handy](https://github.com/cjpais/Handy). This fork adds the VMNTe glass interface, an animated recording orb, eight original sound themes, and vocabulary and editing tools.
+
+Select and preview sounds in **General → Sound → Sound signature**. The built-in themes are Crystal, Felt, Droplet, Silk, Wood, Orbit, Air and Pulse. Your existing settings and models are retained when updating.
+
+See [the VMNTe design and sound notes](docs/VMNTE_UI.md) for assets, generation scripts and validation. The upstream Handy documentation follows below.
+
+---
+
 # Handy
 
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)

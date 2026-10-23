@@ -1,80 +1,30 @@
-/* Xul Flow Colors */
+/* VMNTe v3: paper #f1f1f1, ink #000, Rethink Sans.
+   Flow intentionally uses the light brand canvas for every OS appearance. */
+@font-face {
+  font-family: "Rethink Sans";
+  src: url("/fonts/RethinkSans-Variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+}
 
 :root {
-  /* Palette source of truth. Xul Flow ships one dark identity (no separate
-     light palette yet) — light/dark slots below intentionally hold the same
-     values so the existing theme-switching infrastructure (data-theme,
-     prefers-color-scheme) keeps working unchanged if a light variant is
-     designed later. */
-  --light-color-text: #ffffff;
-  --light-color-background: #121212;
-  --light-color-logo-primary: #ffa400;
-  --light-color-logo-stroke: #cc1016;
-
-  --dark-color-text: #ffffff;
-  --dark-color-background: #121212;
-  --dark-color-logo-primary: #ffa400;
-  --dark-color-logo-stroke: #cc1016;
-
-  /* Semantic status colors. First used by SecureInputWarning; intended to
-     replace the ad-hoc yellow-500/red-500 usages (e.g. ui/Alert.tsx) over
-     time so status styling is themeable from one place. */
-  --light-color-warning: #fbbf24;
-  --light-color-error: #cc1016;
-  --dark-color-warning: #fbbf24;
-  --dark-color-error: #cc1016;
-
-  /* Tokens that do not change between light and dark */
-  --color-background-ui: #ffa400;
-  --color-surface: #242428;
-  --color-text-stroke: #ffffff;
-  --color-mid-gray: #808080;
-
-  /* Active palette — defaults to light, follows the OS via the media query
-     below, or is forced by `data-theme` (see the overrides below). */
-  --color-text: var(--light-color-text);
-  --color-background: var(--light-color-background);
-  --color-logo-primary: var(--light-color-logo-primary);
-  --color-logo-stroke: var(--light-color-logo-stroke);
-  --color-warning: var(--light-color-warning);
-  --color-error: var(--light-color-error);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-text: var(--dark-color-text);
-    --color-background: var(--dark-color-background);
-    --color-logo-primary: var(--dark-color-logo-primary);
-    --color-logo-stroke: var(--dark-color-logo-stroke);
-    --color-warning: var(--dark-color-warning);
-    --color-error: var(--dark-color-error);
-  }
-}
-
-/*
- * Explicit theme override, driven by the `theme` setting via
- * `document.documentElement.dataset.theme`. When set, the higher-specificity
- * attribute selectors win over the `prefers-color-scheme` media query above,
- * so a user can keep Xul Flow light or dark regardless of the OS setting.
- * `system` (or no attribute) leaves the OS in charge.
- *
- * Lives here (not in App.css) so every window that imports the shared palette —
- * the settings window and the recording overlay alike — honours the override.
- */
-:root[data-theme="light"] {
-  --color-text: var(--light-color-text);
-  --color-background: var(--light-color-background);
-  --color-logo-primary: var(--light-color-logo-primary);
-  --color-logo-stroke: var(--light-color-logo-stroke);
-  --color-warning: var(--light-color-warning);
-  --color-error: var(--light-color-error);
-}
-
-:root[data-theme="dark"] {
-  --color-text: var(--dark-color-text);
-  --color-background: var(--dark-color-background);
-  --color-logo-primary: var(--dark-color-logo-primary);
-  --color-logo-stroke: var(--dark-color-logo-stroke);
-  --color-warning: var(--dark-color-warning);
-  --color-error: var(--dark-color-error);
+  color-scheme: light;
+  --font-sans: "Rethink Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --color-text: #000000;
+  --color-background: #f1f1f1;
+  --color-background-ui: #000000;
+  --color-surface: #ffffff;
+  --color-logo-primary: #000000;
+  --color-logo-stroke: #000000;
+  --color-text-stroke: #000000;
+  --color-mid-gray: #615f54;
+  --color-warning: #994e00;
+  --color-error: #c60000;
+  --color-blue: #367bea;
+  --glass-surface: rgb(255 255 255 / 48%);
+  --glass-border: rgb(255 255 255 / 85%);
+  --hairline: rgb(0 0 0 / 9%);
+  --ease-flow: cubic-bezier(0.23, 1, 0.32, 1);
+  --color-log-surface: rgb(0 0 0 / 4%);
 }

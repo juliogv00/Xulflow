@@ -198,13 +198,13 @@ fn strip_sentinel_prefix<'a>(content: &'a str, prefix: &str) -> Option<&'a str> 
 /// requires the explicit "aprende"/"recuerda" keyword, checked deterministically
 /// by the caller via `strip_teach_trigger` *before* this function is even
 /// called — Replace here only ever does one thing: transform the text.
-const REPLACE_SYSTEM_PROMPT: &str = "Eres el motor de edición de texto de Xul Flow. Recibes un texto seleccionado por el usuario, delimitado por las etiquetas <texto_seleccionado>, seguido de una instrucción hablada sobre qué hacer con él (traducirlo, resumirlo, corregirlo, reescribirlo, etc.). Cualquier referencia de la instrucción a \"esto\", \"esta\", \"lo seleccionado\", \"this\", \"it\" y similares apunta siempre al contenido de <texto_seleccionado> — nunca a la instrucción misma ni a las etiquetas. Aplica la instrucción únicamente al contenido de <texto_seleccionado>; no trates la instrucción como si fuera el texto a transformar. Devuelve ÚNICAMENTE el resultado, listo para sustituir la selección tal cual — sin explicaciones, sin comillas envolventes, sin markdown, sin repetir la instrucción ni el texto original salvo que la instrucción pida conservarlo. Si la instrucción no tiene sentido aplicada a ese texto, aplica tu mejor interpretación en vez de pedir aclaraciones.";
+const REPLACE_SYSTEM_PROMPT: &str = "Eres el motor de edición de texto de VMNTe flow. Recibes un texto seleccionado por el usuario, delimitado por las etiquetas <texto_seleccionado>, seguido de una instrucción hablada sobre qué hacer con él (traducirlo, resumirlo, corregirlo, reescribirlo, etc.). Cualquier referencia de la instrucción a \"esto\", \"esta\", \"lo seleccionado\", \"this\", \"it\" y similares apunta siempre al contenido de <texto_seleccionado> — nunca a la instrucción misma ni a las etiquetas. Aplica la instrucción únicamente al contenido de <texto_seleccionado>; no trates la instrucción como si fuera el texto a transformar. Devuelve ÚNICAMENTE el resultado, listo para sustituir la selección tal cual — sin explicaciones, sin comillas envolventes, sin markdown, sin repetir la instrucción ni el texto original salvo que la instrucción pida conservarlo. Si la instrucción no tiene sentido aplicada a ese texto, aplica tu mejor interpretación en vez de pedir aclaraciones.";
 
 /// Fase 7 Mechanism B (teach-by-voice, no selection): extracts a {mal, bien}
 /// correction pair from a free-form spoken clause. Its own dedicated prompt
 /// rather than reusing the Asistente prompt, since that one is user-editable
 /// and can't be relied on to know this sentinel format.
-const DICTIONARY_TEACH_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de Xul Flow. El usuario te da una frase en la que explica una corrección de vocabulario o transcripción que quiere que recuerdes para futuros dictados (p. ej. \"que Chul se escribe Xul\", \"cuando diga cloud es Claude Code\", \"no quiero que pongas cloud, sino que sea Claude Code\"). Extrae la palabra o frase que hoy se transcribe MAL (tal y como el usuario dice que sale) y la CORRECTA (cómo debe escribirse a partir de ahora). Responde EXCLUSIVAMENTE con una línea con este formato exacto, sin nada más: XULFLOW_DICT: mal => correcto. Si no consigues identificar con claridad ambas partes, responde exactamente: XULFLOW_DICT: ERROR";
+const DICTIONARY_TEACH_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de VMNTe flow. El usuario te da una frase en la que explica una corrección de vocabulario o transcripción que quiere que recuerdes para futuros dictados (p. ej. \"que Chul se escribe Xul\", \"cuando diga cloud es Claude Code\", \"no quiero que pongas cloud, sino que sea Claude Code\"). Extrae la palabra o frase que hoy se transcribe MAL (tal y como el usuario dice que sale) y la CORRECTA (cómo debe escribirse a partir de ahora). Responde EXCLUSIVAMENTE con una línea con este formato exacto, sin nada más: XULFLOW_DICT: mal => correcto. Si no consigues identificar con claridad ambas partes, responde exactamente: XULFLOW_DICT: ERROR";
 
 /// Fase 6: send the selected text + spoken instruction to the same
 /// provider/model configured for Asistente post-processing and return the
@@ -268,7 +268,7 @@ async fn process_replace_instruction(
 }
 
 /// Rejects an extracted correction that reads as the model losing the plot
-/// rather than answering — e.g. echoing "Xul Flow"/its own product name back
+/// rather than answering — e.g. echoing "VMNTe flow"/its own product name back
 /// as the "correction" when the input sentence was too garbled (by ASR) to
 /// make sense of. Seen in practice on `extract_dictionary_teach` with a
 /// mangled clause; cheap enough to guard in both extraction functions rather
@@ -347,7 +347,7 @@ async fn extract_dictionary_teach(
 /// called) turns that fuzzy classification into a much easier extraction —
 /// just "what's the corrected spelling in this sentence" — with one thing
 /// already given instead of two things to infer.
-const TEACH_CORRECTION_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de Xul Flow. El usuario te dice cómo debe escribirse a partir de ahora un texto que hoy se transcribe como \"{selected}\" — esa parte ya la sabes, no hace falta que la repitas. Tu única tarea es leer la frase del usuario y responder EXCLUSIVAMENTE con la ortografía correcta que describe, sin nada más — sin comillas, sin explicaciones, sin repetir la frase ni el texto mal escrito. Si no consigues identificar con claridad cuál es la corrección, responde exactamente: ERROR";
+const TEACH_CORRECTION_SYSTEM_PROMPT: &str = "Eres el motor de aprendizaje del diccionario de VMNTe flow. El usuario te dice cómo debe escribirse a partir de ahora un texto que hoy se transcribe como \"{selected}\" — esa parte ya la sabes, no hace falta que la repitas. Tu única tarea es leer la frase del usuario y responder EXCLUSIVAMENTE con la ortografía correcta que describe, sin nada más — sin comillas, sin explicaciones, sin repetir la frase ni el texto mal escrito. Si no consigues identificar con claridad cuál es la corrección, responde exactamente: ERROR";
 
 async fn extract_teach_correction(
     settings: &AppSettings,
@@ -1180,7 +1180,7 @@ impl ShortcutAction for TranscribeAction {
                                             instruction,
                                             true,
                                             Some(to.clone()),
-                                            Some("Xul Flow — Aprendizaje".to_string()),
+                                            Some("VMNTe flow — Aprendizaje".to_string()),
                                         ) {
                                             error!("Failed to save history entry: {}", err);
                                         }
@@ -1253,7 +1253,7 @@ impl ShortcutAction for TranscribeAction {
                                         instruction,
                                         true,
                                         Some(replacement.clone()),
-                                        Some("Xul Flow — Replace".to_string()),
+                                        Some("VMNTe flow — Replace".to_string()),
                                     ) {
                                         error!("Failed to save history entry: {}", err);
                                     }
@@ -1366,7 +1366,7 @@ impl ShortcutAction for TranscribeAction {
                                             transcription,
                                             true,
                                             pair.map(|(from, to)| format!("{} => {}", from, to)),
-                                            Some("Xul Flow — Aprendizaje".to_string()),
+                                            Some("VMNTe flow — Aprendizaje".to_string()),
                                         ) {
                                             error!("Failed to save history entry: {}", err);
                                         }

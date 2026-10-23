@@ -94,7 +94,9 @@ export const CustomDictionary: React.FC<CustomDictionaryProps> = React.memo(
               value={fromDraft}
               onChange={(e) => setFromDraft(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder={t("settings.advanced.customDictionary.fromPlaceholder")}
+              placeholder={t(
+                "settings.advanced.customDictionary.fromPlaceholder",
+              )}
               variant="compact"
               disabled={isBusy}
             />
@@ -107,7 +109,9 @@ export const CustomDictionary: React.FC<CustomDictionaryProps> = React.memo(
               value={toDraft}
               onChange={(e) => setToDraft(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder={t("settings.advanced.customDictionary.toPlaceholder")}
+              placeholder={t(
+                "settings.advanced.customDictionary.toPlaceholder",
+              )}
               variant="compact"
               disabled={isBusy}
             />

@@ -162,7 +162,10 @@ function App() {
       "dictionary-entry-added",
       (event) => {
         toast.success(t("dictionaryTeach.entryAddedTitle"), {
-          description: t("dictionaryTeach.entryAddedDescription", event.payload),
+          description: t(
+            "dictionaryTeach.entryAddedDescription",
+            event.payload,
+          ),
         });
       },
     );
@@ -282,7 +285,7 @@ function App() {
   // unreachable) are silently swallowed and the wizard just appears to "blink".
   const toaster = (
     <Toaster
-      theme="system"
+      theme="light"
       toastOptions={{
         unstyled: true,
         classNames: {
@@ -316,27 +319,42 @@ function App() {
     content = (
       <div
         dir={direction}
-        className="h-screen flex flex-col select-none cursor-default"
+        className="app-shell h-screen flex flex-col select-none cursor-default"
       >
         <ErrorBoundary context="What's New">
           <WhatsNewGate />
         </ErrorBoundary>
         {/* Main content area that takes remaining space */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="app-workspace flex-1 flex overflow-hidden">
           <Sidebar
             activeSection={currentSection}
             onSectionChange={setCurrentSection}
           />
           {/* Scrollable content area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto">
-              <div className="flex flex-col items-center p-4 gap-4">
+          <main className="app-main">
+            <header className="app-topbar">
+              <span>
+                {t("brand.product")}
+                <span className="topbar-separator">/</span>
+                {t(SECTIONS_CONFIG[currentSection].labelKey)}
+              </span>
+              <span className="topbar-caption">{t("brand.topbarCaption")}</span>
+            </header>
+            <div className="app-scroll">
+              <div className="app-content" key={currentSection}>
+                {currentSection !== "general" && (
+                  <div className="page-heading">
+                    <span className="eyebrow">{t("brand.workspace")}</span>
+                    <h1>{t(SECTIONS_CONFIG[currentSection].labelKey)}</h1>
+                    <p>{t(`brand.sections.${currentSection}`)}</p>
+                  </div>
+                )}
                 <AccessibilityPermissions />
                 <SecureInputWarning />
                 {renderSettingsContent(currentSection)}
               </div>
             </div>
-          </div>
+          </main>
         </div>
         {/* Fixed footer at bottom */}
         <Footer />

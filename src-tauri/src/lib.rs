@@ -936,9 +936,11 @@ pub fn run(cli_args: CliArgs) {
             // for portable mode (redirects WebView2 cache to portable Data dir)
             let mut win_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("Handy")
-                    .inner_size(680.0, 570.0)
+                    .title("VMNTe flow")
+                    .inner_size(1040.0, 780.0)
                     .min_inner_size(680.0, 570.0)
+                    .transparent(true)
+                    .background_color(tauri::window::Color(0, 0, 0, 0))
                     .resizable(true)
                     .maximizable(true)
                     .visible(false);
@@ -947,16 +949,33 @@ pub fn run(cli_args: CliArgs) {
                 win_builder = win_builder.data_directory(data_dir.join("webview"));
             }
 
+            // Native glass lets the desktop show through the light web surfaces.
+            #[cfg(target_os = "macos")]
+            {
+                win_builder = win_builder.effects(
+                    tauri::window::EffectsBuilder::new()
+                        .effect(tauri::window::Effect::UnderWindowBackground)
+                        .state(tauri::window::EffectState::Active)
+                        .build(),
+                );
+            }
+            #[cfg(target_os = "windows")]
+            {
+                win_builder = win_builder.effects(
+                    tauri::window::EffectsBuilder::new()
+                        .effect(tauri::window::Effect::Acrylic)
+                        .color(tauri::window::Color(241, 241, 241, 190))
+                        .build(),
+                );
+            }
             win_builder.build()?;
 
             let mut settings = get_settings(app.handle());
 
-            // Apply the persisted appearance theme to the native title bar before
-            // the window is shown, so it matches the in-app palette without a flash
-            // of the wrong theme. See `apply_window_theme` for what this does per
-            // platform.
+            // Flow uses the light VMNTe identity regardless of OS appearance.
+            // Match native glass and title bar without rewriting saved preferences.
             #[cfg(any(target_os = "windows", target_os = "macos"))]
-            shortcut::apply_window_theme(app.handle(), settings.theme);
+            shortcut::apply_window_theme(app.handle(), settings::Theme::Light);
 
             // CLI --debug flag overrides debug_mode and log level (runtime-only, not persisted)
             if cli_args.debug {
